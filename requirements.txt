@@ -1,0 +1,51 @@
+# KISA 네트워크 장비 취약점 분석 API
+# Python 의존성 패키지 목록
+
+# Flask 웹 프레임워크
+Flask==2.3.3
+Flask-CORS==4.0.0
+
+# 요청/응답 처리
+Werkzeug==2.3.7
+Jinja2==3.1.2
+
+# 데이터 검증 및 직렬화
+marshmallow==3.20.1
+jsonschema==4.19.0
+
+# 정규표현식 강화 (선택사항)
+regex==2023.8.8
+
+# 날짜/시간 처리
+python-dateutil==2.8.2
+
+# 설정 관리
+python-dotenv==1.0.0
+
+# 개발/테스트 도구
+pytest==7.4.2
+pytest-flask==1.2.0
+pytest-cov==4.1.0
+
+# 코드 품질 도구
+black==23.7.0
+flake8==6.0.0
+mypy==1.5.1
+
+# 보안 도구
+bandit==1.7.5
+
+# 성능 모니터링 (선택사항)
+psutil==5.9.5
+
+# 로깅 강화 (선택사항)
+colorlog==6.7.0
+
+# 환경별 설정
+gunicorn==21.2.0  # 프로덕션 WSGI 서버
+
+# 문서화 (선택사항)
+flasgger==0.9.7.1  # Swagger UI
+
+# 타입 힌팅 지원
+typing-extensions==4.7.1

@@ -1,0 +1,18 @@
+# ================================
+# docker-compose.dev.yml (개발용)
+version: '3.8'
+
+services:
+  kisa-analyzer-dev:
+    build: .
+    ports:
+      - "5000:5000"
+    environment:
+      - FLASK_ENV=development
+      - LOG_LEVEL=DEBUG
+      - API_DEBUG=true
+    volumes:
+      - .:/app
+      - ./logs:/app/logs
+    command: ["python", "main.py"]
+    restart: unless-stopped

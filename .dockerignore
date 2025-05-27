@@ -1,0 +1,29 @@
+# ================================
+# .dockerignore
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.git/
+.gitignore
+README.md
+.pytest_cache/
+.coverage
+.DS_Store
+*.log
+logs/*.log
+.env
+.env.local
+.env.development
+.env.test
+.env.production
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

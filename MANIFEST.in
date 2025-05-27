@@ -1,0 +1,25 @@
+# ================================
+# MANIFEST.in
+# 패키지에 포함할 추가 파일들 지정
+
+include README.md
+include LICENSE
+include requirements.txt
+include .env.example
+include Makefile
+include Dockerfile
+include docker-compose.yml
+include nginx.conf
+
+recursive-include examples *.cfg *.conf *.txt
+recursive-include tests *.py
+recursive-include scripts *.py *.sh
+recursive-include rules *.py
+recursive-include models *.py
+recursive-include analyzers *.py
+recursive-include utils *.py
+
+global-exclude __pycache__
+global-exclude *.py[co]
+global-exclude .DS_Store
+global-exclude *.log

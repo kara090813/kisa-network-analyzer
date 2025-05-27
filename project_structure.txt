@@ -1,0 +1,467 @@
+# 완전한 프로젝트 구조
+
+kisa-network-analyzer/
+├── main.py                     # Flask 애플리케이션 메인 파일
+├── config.py                   # 애플리케이션 설정
+├── requirements.txt            # Python 의존성
+├── setup.py                   # 패키지 설치 스크립트
+├── Makefile                   # 프로젝트 관리 명령어
+├── Dockerfile                 # Docker 이미지 설정
+├── docker-compose.yml         # Docker Compose 설정
+├── .env.example              # 환경변수 예시
+├── .gitignore                # Git 무시 파일
+├── README.md                 # 프로젝트 문서
+├── LICENSE                   # 라이선스
+├── CHANGELOG.md              # 변경 이력
+├── CONTRIBUTING.md           # 기여 가이드
+│
+├── models/                   # 데이터 모델
+│   ├── __init__.py
+│   ├── analysis_request.py   # 분석 요청 모델
+│   └── analysis_response.py  # 분석 응답 모델
+│
+├── rules/                    # 보안 룰셋
+│   ├── __init__.py
+│   └── security_rules.py     # KISA 가이드 기반 룰셋
+│
+├── analyzers/               # 분석 엔진
+│   ├── __init__.py
+│   └── config_analyzer.py   # 설정 파일 분석기
+│
+├── utils/                   # 유틸리티
+│   ├── __init__.py
+│   ├── validation.py        # 요청 검증
+│   └── logger.py           # 로깅 설정
+│
+├── tests/                   # 테스트
+│   ├── __init__.py
+│   ├── test_analyzer.py     # 분석기 테스트
+│   ├── test_models.py       # 모델 테스트
+│   └── test_api.py         # API 테스트
+│
+├── scripts/                 # 유틸리티 스크립트
+│   ├── install.sh          # 설치 스크립트
+│   ├── benchmark.py        # 성능 벤치마크
+│   ├── rule_validator.py   # 룰셋 검증
+│   ├── config_generator.py # 테스트 설정 생성
+│   ├── docker-build.sh     # Docker 빌드
+│   ├── docker-run.sh       # Docker 실행
+│   └── docker-deploy.sh    # Docker 배포
+│
+├── examples/               # 예제 설정 파일
+│   ├── README.md
+│   ├── cisco_vulnerable.cfg
+│   ├── cisco_secure.cfg
+│   ├── juniper_vulnerable.conf
+│   └── juniper_secure.conf
+│
+├── logs/                   # 로그 파일 (생성됨)
+│   └── .gitkeep
+│
+└── docs/                   # 문서 (향후 확장)
+    └── api.md
+
+# ================================
+# 빠른 시작 가이드
+
+## 1. 설치
+
+### 자동 설치
+```bash
+git clone https://github.com/your-org/kisa-network-analyzer.git
+cd kisa-network-analyzer
+chmod +x scripts/install.sh
+./scripts/install.sh
+```
+
+### 수동 설치
+```bash
+# 1. 저장소 복제
+git clone https://github.com/your-org/kisa-network-analyzer.git
+cd kisa-network-analyzer
+
+# 2. 가상환경 생성
+python3 -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
+
+# 3. 의존성 설치
+pip install -r requirements.txt
+
+# 4. 환경설정
+cp .env.example .env
+mkdir -p logs
+```
+
+## 2. 실행
+
+### 개발 서버
+```bash
+# 가상환경 활성화
+source venv/bin/activate
+
+# 서버 시작
+python main.py
+
+# 또는 Make 사용
+make run
+```
+
+### 프로덕션 서버
+```bash
+# Gunicorn 사용
+gunicorn --bind 0.0.0.0:5000 --workers 4 main:app
+
+# 또는 Make 사용
+make run-prod
+```
+
+### Docker 사용
+```bash
+# 이미지 빌드 및 실행
+make docker-build
+make docker-run
+
+# 또는 Docker Compose
+docker-compose up -d
+```
+
+## 3. API 사용
+
+### 헬스 체크
+```bash
+curl http://localhost:5000/api/v1/health
+```
+
+### 설정 분석
+```bash
+curl -X POST http://localhost:5000/api/v1/config-analyze \
+  -H "Content-Type: application/json" \
+  -d '{
+    "deviceType": "Cisco",
+    "configText": "enable password cisco123\nsnmp-server community public RO",
+    "options": {"checkAllRules": true}
+  }'
+```
+
+### 예제 설정 파일 분석
+```bash
+# 취약한 설정 분석
+python test_api.py --test analyze
+
+# 또는 직접 파일 사용
+curl -X POST http://localhost:5000/api/v1/config-analyze \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"deviceType\": \"Cisco\",
+    \"configText\": \"$(cat examples/cisco_vulnerable.cfg)\",
+    \"options\": {\"checkAllRules\": true}
+  }"
+```
+
+## 4. 테스트
+
+```bash
+# 전체 테스트
+make test
+
+# API 테스트
+make api-test
+
+# 성능 벤치마크
+make benchmark
+
+# 룰셋 검증
+make validate-rules
+```
+
+# ================================
+# 실행 확인 방법
+
+## 1. 서버 시작 확인
+서버를 시작한 후 다음과 같은 출력이 나와야 합니다:
+
+```
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://[::1]:5000
+Press CTRL+C to quit
+ * Restarting with stat
+ * Debugger is active!
+ * Debugger PIN: xxx-xxx-xxx
+```
+
+## 2. 헬스 체크 확인
+```bash
+curl http://localhost:5000/api/v1/health
+```
+
+예상 응답:
+```json
+{
+  "status": "healthy",
+  "version": "1.0.0",
+  "timestamp": "2024-01-15T10:30:00.123456",
+  "service": "KISA Network Security Config Analyzer"
+}
+```
+
+## 3. 룰 목록 확인
+```bash
+curl http://localhost:5000/api/v1/rules
+```
+
+예상 응답:
+```json
+{
+  "success": true,
+  "totalRules": 15,
+  "rules": [
+    {
+      "ruleId": "N-01",
+      "title": "기본 패스워드 변경",
+      "description": "기본 패스워드를 변경하지 않고 사용하는지 점검",
+      "severity": "상",
+      "category": "계정 관리",
+      "deviceTypes": ["Cisco", "Alteon", "Passport", "Juniper", "Piolink"],
+      "reference": "KISA 가이드 N-01 (상) 1.1 패스워드 설정"
+    }
+  ]
+}
+```
+
+## 4. 실제 분석 테스트
+```bash
+curl -X POST http://localhost:5000/api/v1/config-analyze \
+  -H "Content-Type: application/json" \
+  -d '{
+    "deviceType": "Cisco",
+    "configText": "version 15.1\nhostname TestRouter\nenable password cisco123\nsnmp-server community public RO\nline vty 0 4\n password simple\n transport input telnet",
+    "options": {
+      "checkAllRules": true,
+      "includeRecommendations": true
+    }
+  }'
+```
+
+예상 응답:
+```json
+{
+  "success": true,
+  "deviceType": "Cisco",
+  "totalLines": 6,
+  "issuesFound": 3,
+  "analysisTime": 0.15,
+  "results": [
+    {
+      "ruleId": "N-01",
+      "severity": "상",
+      "line": 3,
+      "matchedText": "enable password cisco123",
+      "description": "기본 패스워드를 변경하지 않고 사용",
+      "recommendation": "enable secret 명령어로 암호화된 패스워드 설정 필요",
+      "reference": "KISA 가이드 N-01 (상) 1.1 패스워드 설정",
+      "category": "계정 관리"
+    },
+    {
+      "ruleId": "N-08",
+      "severity": "상", 
+      "line": 4,
+      "matchedText": "snmp-server community public RO",
+      "description": "SNMP 기본 또는 단순한 Community String 사용",
+      "recommendation": "Public, Private 외 유추하기 어려운 복잡한 Community String 설정",
+      "reference": "KISA 가이드 N-08 (상) 5.2 SNMP community string 복잡성 설정",
+      "category": "기능 관리"
+    },
+    {
+      "ruleId": "N-16",
+      "severity": "중",
+      "line": 7,
+      "matchedText": "transport input telnet",
+      "description": "VTY 접속 시 암호화되지 않은 프로토콜 사용",
+      "recommendation": "VTY 라인에서 SSH만 허용하도록 설정",
+      "reference": "KISA 가이드 N-16 (중) 2.3 VTY 접속 시 안전한 프로토콜 사용",
+      "category": "접근 관리"
+    }
+  ],
+  "statistics": {
+    "totalRulesChecked": 25,
+    "rulesPassed": 22,
+    "rulesFailed": 3,
+    "highSeverityIssues": 2,
+    "mediumSeverityIssues": 1,
+    "lowSeverityIssues": 0
+  }
+}
+```
+
+# ================================
+# 문제 해결
+
+## 일반적인 문제들
+
+### 1. 포트 충돌 오류
+```
+OSError: [Errno 48] Address already in use
+```
+
+**해결방법:**
+```bash
+# 포트 사용 중인 프로세스 확인
+lsof -i :5000
+
+# 프로세스 종료
+kill -9 <PID>
+
+# 또는 다른 포트 사용
+export API_PORT=5001
+python main.py
+```
+
+### 2. 의존성 설치 오류
+```bash
+# pip 업그레이드
+pip install --upgrade pip
+
+# 캐시 클리어 후 재설치
+pip cache purge
+pip install -r requirements.txt
+```
+
+### 3. 권한 오류 (Docker)
+```bash
+# Docker 권한 확인
+sudo usermod -aG docker $USER
+newgrp docker
+```
+
+### 4. 메모리 부족
+큰 설정 파일 분석 시 메모리 부족이 발생할 수 있습니다:
+
+```bash
+# 환경변수로 제한 설정
+export MAX_CONFIG_SIZE=5242880  # 5MB
+export ANALYSIS_TIMEOUT=60      # 60초
+```
+
+## 로그 확인
+
+### 애플리케이션 로그
+```bash
+tail -f logs/app.log
+```
+
+### 분석 상세 로그
+```bash
+# 디버그 모드로 실행
+export LOG_LEVEL=DEBUG
+python main.py
+```
+
+## 성능 모니터링
+
+### 메모리 사용량 확인
+```bash
+# 프로세스 모니터링
+ps aux | grep python
+
+# 시스템 리소스 모니터링
+htop
+```
+
+### API 응답시간 측정
+```bash
+# curl로 시간 측정
+curl -w "@curl-format.txt" -X POST http://localhost:5000/api/v1/config-analyze \
+  -H "Content-Type: application/json" \
+  -d @test_request.json
+
+# curl-format.txt 내용:
+#      time_namelookup:  %{time_namelookup}\n
+#         time_connect:  %{time_connect}\n
+#      time_appconnect:  %{time_appconnect}\n
+#     time_pretransfer:  %{time_pretransfer}\n
+#        time_redirect:  %{time_redirect}\n
+#   time_starttransfer:  %{time_starttransfer}\n
+#                     ----------\n
+#           time_total:  %{time_total}\n
+```
+
+# ================================
+# 고급 사용법
+
+## 1. 배치 분석
+여러 설정 파일을 순차적으로 분석:
+
+```python
+import requests
+import os
+
+def batch_analyze(config_dir, device_type):
+    results = {}
+    for filename in os.listdir(config_dir):
+        if filename.endswith('.cfg'):
+            with open(os.path.join(config_dir, filename), 'r') as f:
+                config_text = f.read()
+            
+            response = requests.post('http://localhost:5000/api/v1/config-analyze', 
+                json={
+                    'deviceType': device_type,
+                    'configText': config_text,
+                    'options': {'checkAllRules': True}
+                })
+            
+            if response.status_code == 200:
+                results[filename] = response.json()
+                print(f"{filename}: {results[filename]['issuesFound']} 취약점 발견")
+    
+    return results
+
+# 사용 예시
+results = batch_analyze('/path/to/configs/', 'Cisco')
+```
+
+## 2. 특정 룰만 검사
+보안 등급별로 선별적 분석:
+
+```python
+# 상급 보안 룰만 검사
+high_severity_rules = ['N-01', 'N-02', 'N-03', 'N-04', 'N-05', 'N-07', 'N-08', 'N-11']
+
+response = requests.post('http://localhost:5000/api/v1/config-analyze', 
+    json={
+        'deviceType': 'Cisco',
+        'configText': config_text,
+        'options': {
+            'checkAllRules': False,
+            'specificRuleIds': high_severity_rules
+        }
+    })
+```
+
+## 3. 결과 필터링 및 리포트 생성
+```python
+def generate_security_report(analysis_result):
+    high_issues = [r for r in analysis_result['results'] if r['severity'] == '상']
+    medium_issues = [r for r in analysis_result['results'] if r['severity'] == '중']
+    
+    report = f"""
+보안 분석 리포트
+=================
+장비 타입: {analysis_result['deviceType']}
+분석 라인 수: {analysis_result['totalLines']}
+총 취약점: {analysis_result['issuesFound']}개
+
+상급 취약점: {len(high_issues)}개
+중급 취약점: {len(medium_issues)}개
+
+상급 취약점 상세:
+"""
+    
+    for issue in high_issues:
+        report += f"- [{issue['ruleId']}] 라인 {issue['line']}: {issue['description']}\n"
+        report += f"  권고: {issue['recommendation']}\n\n"
+    
+    return report
+```
+
+프로젝트가 완전히 준비되었습니다! 이제 실제로 사용할 수 있는 완전한 KISA 네트워크 장비 취약점 분석 API입니다.
