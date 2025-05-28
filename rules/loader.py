@@ -24,8 +24,8 @@ SUPPORTED_SOURCES = {
         "name": "CIS Controls",
         "description": "Center for Internet Security Controls",
         "version": "v8",
-        "total_rules": 0,  # 구현 예정
-        "categories": []
+        "total_rules": 11,  # 구현 예정
+       "categories": ["계정 관리", "접근 관리", "로그 관리"]
     },
     "NIST": {
         "name": "NIST Cybersecurity Framework",
@@ -61,8 +61,8 @@ def load_rules(source: str) -> Dict[str, SecurityRule]:
         from .kisa_rules import KISA_RULES
         return KISA_RULES
     elif source == "CIS":
-        # 향후 구현 예정
-        raise NotImplementedError("CIS 룰셋은 아직 구현되지 않았습니다.")
+        from .cis_rules import CIS_RULES
+        return CIS_RULES
     elif source == "NIST":
         # 향후 구현 예정
         raise NotImplementedError("NIST 룰셋은 아직 구현되지 않았습니다.")
