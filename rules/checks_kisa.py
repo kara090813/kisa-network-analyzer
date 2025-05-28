@@ -1,13 +1,14 @@
 # -*- coding: utf-8 -*-
 """
 rules/checks_kisa.py
-KISA 네트워크 장비 보안 점검 룰의 논리적 검증 함수들
+KISA 네트워크 장비 보안 점검 룰의 논리적 검증 함수들 (완전판)
 
 각 KISA 룰에 대한 logical_check_function들을 정의
 """
 
 from typing import List, Dict, Any
 from .kisa_rules import ConfigContext
+import re
 
 
 def check_basic_password_usage(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
@@ -208,6 +209,165 @@ def check_session_timeout(line: str, line_num: int, context: ConfigContext) -> L
     return vulnerabilities
 
 
+def check_security_patch_management(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
+    """N-06: 최신 보안 패치 및 벤더 권고사항 적용 - 논리 기반 분석"""
+    vulnerabilities = []
+    
+    # 이 룰은 주로 문서화 및 정책 점검이므로 설정파일만으로는 완전한 검증이 어려움
+    # 버전 정보 확인을 통한 기본적인 분석만 수행
+    vulnerabilities.append({
+        'line': 0,
+        'matched_text': 'Security patch management policy verification required',
+        'details': {
+            'vulnerability': 'manual_verification_required',
+            'recommendation': 'Verify security patch management policy and version updates',
+            'check_items': [
+                'Check current firmware/software version',
+                'Compare with latest security patches',
+                'Review vendor security advisories'
+            ]
+        }
+    })
+    
+    return vulnerabilities
+
+
+def check_snmp_service_status(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
+    """N-07: SNMP 서비스 확인 - 논리 기반 분석"""
+    vulnerabilities = []
+    
+    # SNMP 서비스가 활성화되어 있는지 확인
+    snmp_enabled = False
+    for line in context.config_lines:
+        if line.strip().startswith('snmp-server') and not line.strip().startswith('no snmp-server'):
+            snmp_enabled = True
+            break
+    
+    if snmp_enabled and not context.snmp_communities:
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': 'SNMP service enabled but no communities configured',
+            'details': {
+                'vulnerability': 'snmp_service_misconfigured',
+                'recommendation': 'Configure SNMP communities properly or disable SNMP service'
+            }
+        })
+    
+    return vulnerabilities
+
+
+def check_snmp_acl_configuration(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
+    """N-09: SNMP ACL 설정 - 논리 기반 분석"""
+    vulnerabilities = []
+    
+    for community_info in context.snmp_communities:
+        if not community_info['acl']:
+            vulnerabilities.append({
+                'line': community_info['line_number'],
+                'matched_text': f"snmp-server community {community_info['community']}",
+                'details': {
+                    'vulnerability': 'no_snmp_acl',
+                    'community': community_info['community'],
+                    'recommendation': 'Configure ACL for SNMP community access restriction'
+                }
+            })
+    
+    return vulnerabilities
+
+
+def check_snmp_community_permissions(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
+    """N-10: SNMP 커뮤니티 권한 설정 - 논리 기반 분석"""
+    vulnerabilities = []
+    
+    for community_info in context.snmp_communities:
+        if community_info['permission'] == 'RW':
+            vulnerabilities.append({
+                'line': community_info['line_number'],
+                'matched_text': f"snmp-server community {community_info['community']} RW",
+                'details': {
+                    'vulnerability': 'snmp_write_permission',
+                    'community': community_info['community'],
+                    'current_permission': 'RW',
+                    'recommendation': 'Change SNMP community permission to RO (read-only)'
+                }
+            })
+    
+    return vulnerabilities
+
+
+def check_tftp_service_status(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
+    """N-11: TFTP 서비스 차단 - 논리 기반 분석"""
+    vulnerabilities = []
+    
+    tftp_enabled = context.parsed_services.get('tftp', False)
+    
+    if tftp_enabled:
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': 'service tftp',
+            'details': {
+                'vulnerability': 'tftp_service_enabled',
+                'recommendation': 'Disable TFTP service: no service tftp'
+            }
+        })
+    
+    return vulnerabilities
+
+
+def check_anti_spoofing_filtering(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
+    """N-12: Spoofing 방지 필터링 적용 - 논리 기반 분석"""
+    vulnerabilities = []
+    
+    # 스푸핑 방지를 위한 ACL 패턴 확인
+    spoofing_protection_found = False
+    
+    for acl_number, acl_lines in context.access_lists.items():
+        for acl_line in acl_lines:
+            # 사설망 대역 차단 ACL 확인
+            if any(pattern in acl_line.lower() for pattern in ['10.0.0.0', '192.168.', '127.0.0.0']):
+                spoofing_protection_found = True
+                break
+        if spoofing_protection_found:
+            break
+    
+    if not spoofing_protection_found:
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': 'Anti-spoofing filtering not configured',
+            'details': {
+                'vulnerability': 'no_anti_spoofing_filter',
+                'recommendation': 'Configure anti-spoofing ACL to block private network ranges'
+            }
+        })
+    
+    return vulnerabilities
+
+
+def check_ddos_protection(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
+    """N-13: DDoS 공격 방어 설정 - 논리 기반 분석"""
+    vulnerabilities = []
+    
+    # DDoS 방어 기능 확인
+    ddos_protection_found = False
+    
+    for line in context.config_lines:
+        if any(pattern in line.lower() for pattern in ['tcp intercept', 'rate-limit', 'ip verify']):
+            ddos_protection_found = True
+            break
+    
+    if not ddos_protection_found:
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': 'DDoS protection not configured',
+            'details': {
+                'vulnerability': 'no_ddos_protection',
+                'recommendation': 'Configure DDoS protection features (TCP intercept, rate limiting, etc.)'
+            }
+        })
+    
+    return vulnerabilities
+
+
 def check_unused_interface_shutdown(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """N-14: 사용하지 않는 인터페이스의 Shutdown 설정 - 완전한 논리 기반 분석"""
     vulnerabilities = []
@@ -255,6 +415,609 @@ def check_unused_interface_shutdown(line: str, line_num: int, context: ConfigCon
     return vulnerabilities
 
 
+def check_user_privilege_levels(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
+    """N-15: 사용자·명령어별 권한 수준 설정 - 논리 기반 분석"""
+    vulnerabilities = []
+    
+    # 권한 레벨 15 (최고 권한) 사용자 수 확인
+    admin_users = [user for user in context.parsed_users if user['privilege_level'] == 15]
+    
+    if len(admin_users) > 2:  # 관리자 계정이 너무 많은 경우
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': f'Too many administrative users ({len(admin_users)})',
+            'details': {
+                'vulnerability': 'excessive_admin_users',
+                'admin_count': len(admin_users),
+                'admin_users': [user['username'] for user in admin_users],
+                'recommendation': 'Minimize the number of users with privilege level 15'
+            }
+        })
+    
+    return vulnerabilities
+
+
+def check_ssh_protocol_usage(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
+    """N-16: VTY 안전한 프로토콜 사용 - 논리 기반 분석"""
+    vulnerabilities = []
+    
+    for vty_line in context.vty_lines:
+        transport_input = vty_line.get('transport_input', [])
+        
+        # Telnet 허용 확인
+        if 'telnet' in transport_input or 'all' in transport_input:
+            vulnerabilities.append({
+                'line': vty_line['line_number'],
+                'matched_text': f"{vty_line['line']} transport input {' '.join(transport_input)}",
+                'details': {
+                    'vulnerability': 'telnet_allowed',
+                    'transport_input': transport_input,
+                    'recommendation': 'Use transport input ssh only'
+                }
+            })
+        
+        # SSH 버전 확인
+        if 'ssh' in transport_input:
+            # SSH 버전 2 사용 여부 확인 (전역 설정에서)
+            if 'ip ssh version 2' not in context.full_config.lower():
+                vulnerabilities.append({
+                    'line': vty_line['line_number'],
+                    'matched_text': f"{vty_line['line']} (SSH version not specified)",
+                    'details': {
+                        'vulnerability': 'ssh_version_not_specified',
+                        'recommendation': 'Add: ip ssh version 2'
+                    }
+                })
+    
+    return vulnerabilities
+
+
+def check_auxiliary_port_security(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
+    """N-17: 불필요한 보조 입·출력 포트 사용 금지 - 논리 기반 분석"""
+    vulnerabilities = []
+    
+    # AUX 포트 설정 확인
+    aux_port_secure = False
+    
+    for line in context.config_lines:
+        if line.strip().startswith('line aux'):
+            # AUX 포트 보안 설정 확인
+            if 'no exec' in context.full_config and 'transport input none' in context.full_config:
+                aux_port_secure = True
+            break
+    
+    if not aux_port_secure:
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': 'AUX port not properly secured',
+            'details': {
+                'vulnerability': 'aux_port_not_secured',
+                'recommendation': 'Configure AUX port with: no exec, transport input none'
+            }
+        })
+    
+    return vulnerabilities
+
+
+def check_login_banner_message(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
+    """N-18: 로그온 시 경고 메시지 설정 - 논리 기반 분석"""
+    vulnerabilities = []
+    
+    # 배너 메시지 설정 확인
+    has_banner = any(line.strip().startswith('banner') for line in context.config_lines)
+    
+    if not has_banner:
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': 'No login banner configured',
+            'details': {
+                'vulnerability': 'no_login_banner',
+                'recommendation': 'Configure login banner message for unauthorized access warning'
+            }
+        })
+    
+    return vulnerabilities
+
+
+def check_remote_log_server(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
+    """N-19: 원격 로그서버 사용 - 논리 기반 분석"""
+    vulnerabilities = []
+    
+    # 원격 로그 서버 설정 확인
+    has_remote_logging = False
+    
+    for line in context.config_lines:
+        if re.match(r'^logging\s+\d+\.\d+\.\d+\.\d+', line.strip()):
+            has_remote_logging = True
+            break
+    
+    if not has_remote_logging:
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': 'Remote log server not configured',
+            'details': {
+                'vulnerability': 'no_remote_log_server',
+                'recommendation': 'Configure remote syslog server for centralized logging'
+            }
+        })
+    
+    return vulnerabilities
+
+
+def check_logging_buffer_size(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
+    """N-20: 로깅 버퍼 크기 설정 - 논리 기반 분석"""
+    vulnerabilities = []
+    
+    # 로깅 버퍼 크기 확인
+    buffer_size = None
+    
+    for line in context.config_lines:
+        match = re.match(r'^logging\s+buffered\s+(\d+)', line.strip())
+        if match:
+            buffer_size = int(match.group(1))
+            break
+    
+    if buffer_size is None:
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': 'Logging buffer size not configured',
+            'details': {
+                'vulnerability': 'no_logging_buffer_size',
+                'recommendation': 'Configure appropriate logging buffer size (16000-32000 bytes)'
+            }
+        })
+    elif buffer_size < 16000:
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': f'Logging buffer size too small ({buffer_size})',
+            'details': {
+                'vulnerability': 'insufficient_logging_buffer_size',
+                'current_size': buffer_size,
+                'recommendation': 'Increase logging buffer size to at least 16000 bytes'
+            }
+        })
+    
+    return vulnerabilities
+
+
+def check_logging_policy_configuration(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
+    """N-21: 정책에 따른 로깅 설정 - 논리 기반 분석"""
+    vulnerabilities = []
+    
+    # 기본 로깅 설정 확인
+    logging_enabled = any(line.strip().startswith('logging on') for line in context.config_lines)
+    
+    if not logging_enabled:
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': 'Logging not enabled',
+            'details': {
+                'vulnerability': 'logging_disabled',
+                'recommendation': 'Enable logging with appropriate policy configuration'
+            }
+        })
+    
+    return vulnerabilities
+
+
+def check_ntp_server_configuration(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
+    """N-22: NTP 서버 연동 - 논리 기반 분석"""
+    vulnerabilities = []
+    
+    # NTP 서버 설정 확인
+    has_ntp_server = False
+    
+    for line in context.config_lines:
+        if re.match(r'^ntp\s+server\s+\d+\.\d+\.\d+\.\d+', line.strip()):
+            has_ntp_server = True
+            break
+    
+    if not has_ntp_server:
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': 'NTP server not configured',
+            'details': {
+                'vulnerability': 'no_ntp_server',
+                'recommendation': 'Configure NTP server for time synchronization'
+            }
+        })
+    
+    return vulnerabilities
+
+
+def check_timestamp_logging(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
+    """N-23: timestamp 로그 설정 - 논리 기반 분석"""
+    vulnerabilities = []
+    
+    # 타임스탬프 로깅 설정 확인
+    has_timestamp = any('service timestamps' in line for line in context.config_lines)
+    
+    if not has_timestamp:
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': 'Timestamp logging not configured',
+            'details': {
+                'vulnerability': 'no_timestamp_logging',
+                'recommendation': 'Configure service timestamps log datetime for log entries'
+            }
+        })
+    
+    return vulnerabilities
+
+
+def check_tcp_keepalive_service(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
+    """N-24: TCP Keepalive 서비스 설정 - 논리 기반 분석"""
+    vulnerabilities = []
+    
+    # TCP Keepalive 설정 확인
+    tcp_keepalive_in = context.parsed_services.get('tcp-keepalives-in', False)
+    tcp_keepalive_out = context.parsed_services.get('tcp-keepalives-out', False)
+    
+    if not tcp_keepalive_in or not tcp_keepalive_out:
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': 'TCP Keepalive service not fully configured',
+            'details': {
+                'vulnerability': 'tcp_keepalive_not_configured',
+                'tcp_keepalive_in': tcp_keepalive_in,
+                'tcp_keepalive_out': tcp_keepalive_out,
+                'recommendation': 'Configure both service tcp-keepalives-in and tcp-keepalives-out'
+            }
+        })
+    
+    return vulnerabilities
+
+
+def check_finger_service_status(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
+    """N-25: Finger 서비스 차단 - 논리 기반 분석"""
+    vulnerabilities = []
+    
+    # Finger 서비스 설정 확인
+    finger_enabled = context.parsed_services.get('finger', False)
+    
+    if finger_enabled:
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': 'Finger service enabled',
+            'details': {
+                'vulnerability': 'finger_service_enabled',
+                'recommendation': 'Disable finger service: no service finger'
+            }
+        })
+    
+    return vulnerabilities
+
+
+def check_web_service_security(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
+    """N-26: 웹 서비스 차단 - 논리 기반 분석"""
+    vulnerabilities = []
+    
+    # HTTP 서버 설정 확인
+    http_server_enabled = context.parsed_services.get('http_server', False)
+    
+    if http_server_enabled:
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': 'HTTP server enabled',
+            'details': {
+                'vulnerability': 'http_server_enabled',
+                'recommendation': 'Disable HTTP server: no ip http server'
+            }
+        })
+    
+    return vulnerabilities
+
+
+def check_small_services_status(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
+    """N-27: TCP/UDP Small 서비스 차단 - 논리 기반 분석"""
+    vulnerabilities = []
+    
+    # Small services 설정 확인
+    tcp_small_servers = context.parsed_services.get('tcp-small-servers', False)
+    udp_small_servers = context.parsed_services.get('udp-small-servers', False)
+    
+    if tcp_small_servers or udp_small_servers:
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': 'Small services enabled',
+            'details': {
+                'vulnerability': 'small_services_enabled',
+                'tcp_small_servers': tcp_small_servers,
+                'udp_small_servers': udp_small_servers,
+                'recommendation': 'Disable small services: no service tcp-small-servers, no service udp-small-servers'
+            }
+        })
+    
+    return vulnerabilities
+
+
+def check_bootp_service_status(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
+    """N-28: Bootp 서비스 차단 - 논리 기반 분석"""
+    vulnerabilities = []
+    
+    # BOOTP 서버 설정 확인
+    bootp_server_enabled = False
+    
+    for line in context.config_lines:
+        if line.strip().startswith('ip bootp server') and not line.strip().startswith('no ip bootp server'):
+            bootp_server_enabled = True
+            break
+    
+    if bootp_server_enabled:
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': 'BOOTP server enabled',
+            'details': {
+                'vulnerability': 'bootp_server_enabled',
+                'recommendation': 'Disable BOOTP server: no ip bootp server'
+            }
+        })
+    
+    return vulnerabilities
+
+
+def check_cdp_service_status(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
+    """N-29: CDP 서비스 차단 - 논리 기반 분석"""
+    vulnerabilities = []
+    
+    # CDP 서비스 설정 확인
+    cdp_enabled = False
+    
+    for line in context.config_lines:
+        if line.strip() == 'cdp run':
+            cdp_enabled = True
+            break
+        elif line.strip() == 'no cdp run':
+            cdp_enabled = False
+            break
+    
+    if cdp_enabled:
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': 'CDP service enabled',
+            'details': {
+                'vulnerability': 'cdp_service_enabled',
+                'recommendation': 'Disable CDP service: no cdp run'
+            }
+        })
+    
+    return vulnerabilities
+
+
+def check_directed_broadcast_status(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
+    """N-30: Directed-broadcast 차단 - 논리 기반 분석"""
+    vulnerabilities = []
+    
+    # Directed broadcast 설정 확인
+    for interface_name, interface_config in context.parsed_interfaces.items():
+        directed_broadcast_disabled = False
+        
+        for config_line in interface_config.get('config_lines', []):
+            if 'no ip directed-broadcast' in config_line:
+                directed_broadcast_disabled = True
+                break
+        
+        if not directed_broadcast_disabled and interface_config['port_type'] in ['FastEthernet', 'GigabitEthernet']:
+            vulnerabilities.append({
+                'line': interface_config['line_number'],
+                'matched_text': f"interface {interface_name}",
+                'details': {
+                    'vulnerability': 'directed_broadcast_not_disabled',
+                    'interface_name': interface_name,
+                    'recommendation': 'Disable directed broadcast: no ip directed-broadcast'
+                }
+            })
+    
+    return vulnerabilities
+
+
+def check_source_routing_status(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
+    """N-31: Source 라우팅 차단 - 논리 기반 분석"""
+    vulnerabilities = []
+    
+    # Source routing 설정 확인
+    source_routing_disabled = any('no ip source-route' in line for line in context.config_lines)
+    
+    if not source_routing_disabled:
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': 'Source routing not disabled',
+            'details': {
+                'vulnerability': 'source_routing_enabled',
+                'recommendation': 'Disable source routing: no ip source-route'
+            }
+        })
+    
+    return vulnerabilities
+
+
+def check_proxy_arp_status(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
+    """N-32: Proxy ARP 차단 - 논리 기반 분석"""
+    vulnerabilities = []
+    
+    # Proxy ARP 설정 확인
+    for interface_name, interface_config in context.parsed_interfaces.items():
+        proxy_arp_disabled = False
+        
+        for config_line in interface_config.get('config_lines', []):
+            if 'no ip proxy-arp' in config_line:
+                proxy_arp_disabled = True
+                break
+        
+        if not proxy_arp_disabled and interface_config['port_type'] in ['FastEthernet', 'GigabitEthernet']:
+            vulnerabilities.append({
+                'line': interface_config['line_number'],
+                'matched_text': f"interface {interface_name}",
+                'details': {
+                    'vulnerability': 'proxy_arp_not_disabled',
+                    'interface_name': interface_name,
+                    'recommendation': 'Disable proxy ARP: no ip proxy-arp'
+                }
+            })
+    
+    return vulnerabilities
+
+
+def check_icmp_services_status(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
+    """N-33: ICMP unreachable, Redirect 차단 - 논리 기반 분석"""
+    vulnerabilities = []
+    
+    # ICMP unreachable, redirect 설정 확인
+    for interface_name, interface_config in context.parsed_interfaces.items():
+        unreachables_disabled = False
+        redirects_disabled = False
+        
+        for config_line in interface_config.get('config_lines', []):
+            if 'no ip unreachables' in config_line:
+                unreachables_disabled = True
+            if 'no ip redirects' in config_line:
+                redirects_disabled = True
+        
+        if not unreachables_disabled or not redirects_disabled:
+            vulnerabilities.append({
+                'line': interface_config['line_number'],
+                'matched_text': f"interface {interface_name}",
+                'details': {
+                    'vulnerability': 'icmp_services_not_disabled',
+                    'interface_name': interface_name,
+                    'unreachables_disabled': unreachables_disabled,
+                    'redirects_disabled': redirects_disabled,
+                    'recommendation': 'Disable ICMP unreachables and redirects: no ip unreachables, no ip redirects'
+                }
+            })
+    
+    return vulnerabilities
+
+
+def check_identd_service_status(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
+    """N-34: identd 서비스 차단 - 논리 기반 분석"""
+    vulnerabilities = []
+    
+    # identd 서비스 설정 확인
+    identd_enabled = False
+    
+    for line in context.config_lines:
+        if line.strip().startswith('ip identd') and not line.strip().startswith('no ip identd'):
+            identd_enabled = True
+            break
+    
+    if identd_enabled:
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': 'identd service enabled',
+            'details': {
+                'vulnerability': 'identd_service_enabled',
+                'recommendation': 'Disable identd service: no ip identd'
+            }
+        })
+    
+    return vulnerabilities
+
+
+def check_domain_lookup_status(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
+    """N-35: Domain lookup 차단 - 논리 기반 분석"""
+    vulnerabilities = []
+    
+    # Domain lookup 설정 확인
+    domain_lookup_enabled = context.parsed_services.get('domain_lookup', True)  # 기본값은 enabled
+    
+    if domain_lookup_enabled:
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': 'Domain lookup enabled',
+            'details': {
+                'vulnerability': 'domain_lookup_enabled',
+                'recommendation': 'Disable domain lookup: no ip domain-lookup'
+            }
+        })
+    
+    return vulnerabilities
+
+
+def check_pad_service_status(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
+    """N-36: PAD 차단 - 논리 기반 분석"""
+    vulnerabilities = []
+    
+    # PAD 서비스 설정 확인
+    pad_enabled = context.parsed_services.get('pad', False)
+    
+    if pad_enabled:
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': 'PAD service enabled',
+            'details': {
+                'vulnerability': 'pad_service_enabled',
+                'recommendation': 'Disable PAD service: no service pad'
+            }
+        })
+    
+    return vulnerabilities
+
+
+def check_mask_reply_status(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
+    """N-37: mask-reply 차단 - 논리 기반 분석"""
+    vulnerabilities = []
+    
+    # Mask reply 설정 확인
+    for interface_name, interface_config in context.parsed_interfaces.items():
+        mask_reply_disabled = False
+        
+        for config_line in interface_config.get('config_lines', []):
+            if 'no ip mask-reply' in config_line:
+                mask_reply_disabled = True
+                break
+        
+        if not mask_reply_disabled and interface_config['port_type'] in ['FastEthernet', 'GigabitEthernet']:
+            vulnerabilities.append({
+                'line': interface_config['line_number'],
+                'matched_text': f"interface {interface_name}",
+                'details': {
+                    'vulnerability': 'mask_reply_not_disabled',
+                    'interface_name': interface_name,
+                    'recommendation': 'Disable mask reply: no ip mask-reply'
+                }
+            })
+    
+    return vulnerabilities
+
+
+def check_switch_hub_security(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
+    """N-38: 스위치, 허브 보안 강화 - 논리 기반 분석"""
+    vulnerabilities = []
+    
+    # 포트 보안 및 SPAN 설정 확인
+    port_security_configured = False
+    span_configured = False
+    
+    for line in context.config_lines:
+        if 'switchport port-security' in line:
+            port_security_configured = True
+        if 'monitor session' in line:
+            span_configured = True
+    
+    if not port_security_configured:
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': 'Port security not configured',
+            'details': {
+                'vulnerability': 'no_port_security',
+                'recommendation': 'Configure port security on switch ports'
+            }
+        })
+    
+    if not span_configured:
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': 'SPAN not configured',
+            'details': {
+                'vulnerability': 'no_span_configuration',
+                'recommendation': 'Configure SPAN (Switch Port Analyzer) for monitoring'
+            }
+        })
+    
+    return vulnerabilities
+
+
 def check_snmp_security(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """N-08: SNMP Community String 복잡성 - 완전한 논리 기반 분석"""
     vulnerabilities = []
@@ -291,41 +1054,6 @@ def check_snmp_security(line: str, line_num: int, context: ConfigContext) -> Lis
                     'community_length': community_info['length']
                 }
             })
-    
-    return vulnerabilities
-
-
-def check_ssh_protocol_usage(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """N-16: VTY 안전한 프로토콜 사용 - 논리 기반 분석"""
-    vulnerabilities = []
-    
-    for vty_line in context.vty_lines:
-        transport_input = vty_line.get('transport_input', [])
-        
-        # Telnet 허용 확인
-        if 'telnet' in transport_input or 'all' in transport_input:
-            vulnerabilities.append({
-                'line': vty_line['line_number'],
-                'matched_text': f"{vty_line['line']} transport input {' '.join(transport_input)}",
-                'details': {
-                    'vulnerability': 'telnet_allowed',
-                    'transport_input': transport_input,
-                    'recommendation': 'Use transport input ssh only'
-                }
-            })
-        
-        # SSH 버전 확인
-        if 'ssh' in transport_input:
-            # SSH 버전 2 사용 여부 확인 (전역 설정에서)
-            if 'ip ssh version 2' not in context.full_config.lower():
-                vulnerabilities.append({
-                    'line': vty_line['line_number'],
-                    'matched_text': f"{vty_line['line']} (SSH version not specified)",
-                    'details': {
-                        'vulnerability': 'ssh_version_not_specified',
-                        'recommendation': 'Add: ip ssh version 2'
-                    }
-                })
     
     return vulnerabilities
 
