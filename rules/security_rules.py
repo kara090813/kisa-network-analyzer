@@ -43,7 +43,7 @@ class SecurityRule:
 
 
 # KISA 가이드 기반 보안 룰셋 정의 (38개 전체)
-SECURITY_RULES = {
+KISA_SECURITY_RULES = {
     # ======================= 계정 관리 =======================
     
     # N-01: 패스워드 설정 (기본 패스워드 변경)
@@ -801,13 +801,13 @@ SECURITY_RULES = {
 
 def get_all_rules() -> Dict[str, SecurityRule]:
     """모든 보안 룰 반환"""
-    return SECURITY_RULES
+    return KISA_SECURITY_RULES
 
 
 def get_rules_by_device_type(device_type: str) -> Dict[str, SecurityRule]:
     """특정 장비 타입에 적용 가능한 룰들만 반환"""
     return {
-        rule_id: rule for rule_id, rule in SECURITY_RULES.items()
+        rule_id: rule for rule_id, rule in KISA_SECURITY_RULES.items()
         if device_type in rule.device_types
     }
 
@@ -815,7 +815,7 @@ def get_rules_by_device_type(device_type: str) -> Dict[str, SecurityRule]:
 def get_rules_by_severity(severity: str) -> Dict[str, SecurityRule]:
     """특정 심각도의 룰들만 반환"""
     return {
-        rule_id: rule for rule_id, rule in SECURITY_RULES.items()
+        rule_id: rule for rule_id, rule in KISA_SECURITY_RULES.items()
         if rule.severity == severity
     }
 
@@ -823,11 +823,11 @@ def get_rules_by_severity(severity: str) -> Dict[str, SecurityRule]:
 def get_rules_by_category(category: RuleCategory) -> Dict[str, SecurityRule]:
     """특정 카테고리의 룰들만 반환"""
     return {
-        rule_id: rule for rule_id, rule in SECURITY_RULES.items()
+        rule_id: rule for rule_id, rule in KISA_SECURITY_RULES.items()
         if rule.category == category
     }
 
 
 def get_rule_by_id(rule_id: str) -> Optional[SecurityRule]:
     """특정 룰 ID로 룰 반환"""
-    return SECURITY_RULES.get(rule_id)
+    return KISA_SECURITY_RULES.get(rule_id)

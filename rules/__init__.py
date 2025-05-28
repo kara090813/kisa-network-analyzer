@@ -6,7 +6,7 @@
 from .security_rules import (
     SecurityRule,
     RuleCategory,
-    SECURITY_RULES,
+    KISA_SECURITY_RULES,
     get_all_rules,
     get_rules_by_device_type,
     get_rules_by_severity,
@@ -17,7 +17,7 @@ from .security_rules import (
 __all__ = [
     'SecurityRule',
     'RuleCategory', 
-    'SECURITY_RULES',
+    'KISA_SECURITY_RULES',
     'get_all_rules',
     'get_rules_by_device_type',
     'get_rules_by_severity',
