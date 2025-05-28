@@ -18,6 +18,7 @@ import json
 import logging
 from datetime import datetime
 import traceback
+from typing import Dict, List, Any, Optional  # ✅ 타입 힌트 import 추가
 
 # 강화된 분석기 import
 from analyzers.config_analyzer import EnhancedConfigAnalyzer
@@ -46,22 +47,33 @@ def health_check():
     """
     API 상태 확인 엔드포인트 (강화된 정보 포함)
     """
-    analysis_stats = analyzer.get_analysis_statistics()
-    
-    return jsonify({
-        "status": "healthy",
-        "version": API_VERSION,
-        "engineVersion": ANALYSIS_ENGINE_VERSION,
-        "timestamp": datetime.now().isoformat(),
-        "service": "KISA Network Security Config Analyzer (Enhanced)",
-        "features": {
-            "logicalAnalysis": True,
-            "patternMatching": True,
-            "hybridAnalysis": True,
-            "contextualParsing": True
-        },
-        "statistics": analysis_stats
-    })
+    try:
+        analysis_stats = analyzer.get_analysis_statistics()
+        
+        return jsonify({
+            "status": "healthy",
+            "version": API_VERSION,
+            "engineVersion": ANALYSIS_ENGINE_VERSION,
+            "timestamp": datetime.now().isoformat(),
+            "service": "KISA Network Security Config Analyzer (Enhanced)",
+            "features": {
+                "logicalAnalysis": True,
+                "patternMatching": True,
+                "hybridAnalysis": True,
+                "contextualParsing": True
+            },
+            "statistics": analysis_stats
+        })
+    except Exception as e:
+        logger.error(f"헬스 체크 중 오류 발생: {str(e)}")
+        return jsonify({
+            "status": "error",
+            "version": API_VERSION,
+            "engineVersion": ANALYSIS_ENGINE_VERSION,
+            "timestamp": datetime.now().isoformat(),
+            "service": "KISA Network Security Config Analyzer (Enhanced)",
+            "error": str(e)
+        }), 500
 
 
 @app.route('/api/v1/rules', methods=['GET'])
@@ -423,7 +435,7 @@ def get_analysis_statistics():
         }), 500
 
 
-def _extract_context_info(config_text: str, device_type: str) -> Dict:
+def _extract_context_info(config_text: str, device_type: str) -> Dict[str, Any]:
     """설정 파일에서 컨텍스트 정보 추출"""
     try:
         from rules.security_rules import parse_config_context
@@ -498,7 +510,7 @@ def payload_too_large(error):
 
 if __name__ == '__main__':
     # 환경변수에서 포트 가져오기 (Railway 호환)
-    port = int(os.environ.get('PORT', 5000))
+    port = int(os.environ.get('PORT', 5002))
     debug = os.environ.get('FLASK_ENV') != 'production'
     
     # 시작 로그
