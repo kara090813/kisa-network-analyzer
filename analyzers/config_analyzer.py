@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-analyzers/config_analyzer.py (Enhanced Version)
-네트워크 장비 설정 파일 분석 엔진 - 논리 기반 분석 강화
+analyzers/config_analyzer.py (Enhanced Version - Multi-Framework Support)
+네트워크 장비 설정 파일 분석 엔진 - 논리 기반 분석 강화 및 다중 지침서 지원
 
 기존 정규식 매칭과 논리 기반 판단을 결합한 고도화된 분석 엔진
 복잡한 조건 분석 및 컨텍스트 기반 취약점 탐지 지원
+KISA, CIS, NIST 등 다중 지침서 지원
 """
 
 import re
@@ -12,10 +13,21 @@ import time
 from typing import List, Dict, Optional, Tuple, Any
 import logging
 
-from rules.security_rules import (
-    get_all_rules, get_rules_by_device_type, get_rule_by_id,
-    SecurityRule, RuleCategory, ConfigContext, parse_config_context
+# 새로운 룰 로더 시스템 import
+from rules.loader import (
+    load_rules, 
+    get_rules_by_device_type, 
+    get_rules_by_severity,
+    get_rule_by_id,
+    get_supported_sources
 )
+from rules.kisa_rules import (
+    SecurityRule, 
+    RuleCategory, 
+    ConfigContext, 
+    parse_config_context
+)
+
 from models.analysis_request import AnalysisRequest
 from models.analysis_response import (
     VulnerabilityIssue, AnalysisResult, AnalysisStatistics
@@ -23,35 +35,63 @@ from models.analysis_response import (
 
 
 class EnhancedConfigAnalyzer:
-    """네트워크 장비 설정 파일 분석기 - 논리 기반 분석 강화"""
+    """네트워크 장비 설정 파일 분석기 - 논리 기반 분석 강화 및 다중 지침서 지원"""
     
-    def __init__(self):
-        """분석기 초기화"""
+    def __init__(self, default_framework: str = "KISA"):
+        """
+        분석기 초기화
+        
+        Args:
+            default_framework: 기본 사용할 지침서 (KISA, CIS, NIST 등)
+        """
         self.logger = logging.getLogger(__name__)
-        self.rules = get_all_rules()
+        self.default_framework = default_framework.upper()
+        
+        # 기본 지침서 룰 로드
+        try:
+            self.rules = load_rules(self.default_framework)
+            self.logger.info(f"기본 지침서 '{self.default_framework}' 룰 로드 완료: {len(self.rules)}개")
+        except (ValueError, NotImplementedError) as e:
+            self.logger.warning(f"기본 지침서 '{self.default_framework}' 로드 실패: {e}")
+            # KISA로 폴백
+            self.default_framework = "KISA"
+            self.rules = load_rules("KISA")
+            self.logger.info(f"KISA 지침서로 폴백: {len(self.rules)}개 룰 로드")
         
         # 분석 통계
         self.analysis_stats = {
             'total_analyses': 0,
             'logical_analyses': 0,
             'pattern_analyses': 0,
-            'hybrid_analyses': 0
+            'hybrid_analyses': 0,
+            'framework_usage': {}
         }
         
-    def analyze_config(self, request: AnalysisRequest) -> AnalysisResult:
+    def analyze_config(self, request: AnalysisRequest, framework: Optional[str] = None) -> AnalysisResult:
         """
-        설정 파일 분석 메인 함수 - 논리 기반 + 패턴 매칭 하이브리드
+        설정 파일 분석 메인 함수 - 다중 지침서 지원
         
         Args:
             request: 분석 요청 객체
+            framework: 사용할 지침서 (None이면 기본 지침서 사용)
             
         Returns:
             AnalysisResult: 분석 결과
         """
         start_time = time.time()
         
-        # 장비 타입에 맞는 룰셋 선택
-        applicable_rules = self._get_applicable_rules(request)
+        # 사용할 지침서 결정
+        target_framework = framework or self.default_framework
+        target_framework = target_framework.upper()
+        
+        # 지침서 룰셋 로드
+        try:
+            applicable_rules = self._get_applicable_rules(request, target_framework)
+        except (ValueError, NotImplementedError) as e:
+            self.logger.error(f"지침서 '{target_framework}' 룰 로드 실패: {e}")
+            # 기본 지침서로 폴백
+            target_framework = self.default_framework
+            applicable_rules = self._get_applicable_rules(request, target_framework)
         
         # 설정 컨텍스트 파싱 (논리 기반 분석을 위한 사전 처리)
         config_context = parse_config_context(request.config_text, request.device_type)
@@ -72,9 +112,12 @@ class EnhancedConfigAnalyzer:
         
         # 분석 통계 업데이트
         self.analysis_stats['total_analyses'] += 1
+        self.analysis_stats['framework_usage'][target_framework] = \
+            self.analysis_stats['framework_usage'].get(target_framework, 0) + 1
         
         self.logger.info(
-            f"하이브리드 분석 완료 - 장비: {request.device_type}, "
+            f"다중 지침서 분석 완료 - 지침서: {target_framework}, "
+            f"장비: {request.device_type}, "
             f"적용 룰: {len(applicable_rules)}개, "
             f"발견 취약점: {len(vulnerabilities)}개, "
             f"분석 시간: {analysis_time:.2f}초"
@@ -361,14 +404,16 @@ class EnhancedConfigAnalyzer:
         
         return vulnerabilities
     
-    def _get_applicable_rules(self, request: AnalysisRequest) -> Dict[str, SecurityRule]:
-        """요청에 적용 가능한 룰셋 반환"""
+    def _get_applicable_rules(self, request: AnalysisRequest, framework: str = None) -> Dict[str, SecurityRule]:
+        """요청에 적용 가능한 룰셋 반환 (다중 지침서 지원)"""
+        target_framework = framework or self.default_framework
+        
         if request.options.check_all_rules:
-            return get_rules_by_device_type(request.device_type)
+            return get_rules_by_device_type(target_framework, request.device_type)
         else:
             specific_rules = {}
             for rule_id in request.options.specific_rule_ids or []:
-                rule = get_rule_by_id(rule_id)
+                rule = get_rule_by_id(target_framework, rule_id)
                 if rule and request.device_type in rule.device_types:
                     specific_rules[rule_id] = rule
             return specific_rules
@@ -454,12 +499,19 @@ class EnhancedConfigAnalyzer:
             low_severity_issues=severity_counts["하"]
         )
     
-    # ==================== 확장된 API 메서드들 ====================
+    # ==================== 확장된 API 메서드들 (다중 지침서 지원) ====================
     
-    def get_available_rules(self) -> List[Dict]:
-        """사용 가능한 룰 목록 반환 (강화된 정보 포함)"""
+    def get_available_rules(self, framework: str = None) -> List[Dict]:
+        """사용 가능한 룰 목록 반환 (다중 지침서 지원)"""
+        target_framework = framework or self.default_framework
+        
+        try:
+            rules_dict = load_rules(target_framework)
+        except (ValueError, NotImplementedError):
+            rules_dict = self.rules
+        
         rules_list = []
-        for rule_id, rule in self.rules.items():
+        for rule_id, rule in rules_dict.items():
             rule_info = {
                 "ruleId": rule.rule_id,
                 "title": rule.title,
@@ -469,16 +521,25 @@ class EnhancedConfigAnalyzer:
                 "deviceTypes": rule.device_types,
                 "reference": rule.reference,
                 "hasLogicalAnalysis": rule.logical_check_function is not None,
+                "framework": target_framework,
                 "vulnerabilityExamples": rule.vulnerability_examples,
                 "safeExamples": rule.safe_examples,
                 "heuristicRules": rule.heuristic_rules
             }
             rules_list.append(rule_info)
+        
         return sorted(rules_list, key=lambda x: x["ruleId"])
     
-    def get_rule_detail(self, rule_id: str) -> Optional[Dict]:
-        """특정 룰의 상세 정보 반환 (강화된 정보 포함)"""
-        rule = get_rule_by_id(rule_id)
+    def get_rule_detail(self, rule_id: str, framework: str = None) -> Optional[Dict]:
+        """특정 룰의 상세 정보 반환 (다중 지침서 지원)"""
+        target_framework = framework or self.default_framework
+        
+        try:
+            rule = get_rule_by_id(target_framework, rule_id)
+        except (ValueError, NotImplementedError):
+            rule = get_rule_by_id("KISA", rule_id)
+            target_framework = "KISA"
+        
         if not rule:
             return None
         
@@ -493,6 +554,7 @@ class EnhancedConfigAnalyzer:
             "negativePatterns": rule.negative_patterns,
             "recommendation": rule.recommendation,
             "reference": rule.reference,
+            "framework": target_framework,
             "hasLogicalAnalysis": rule.logical_check_function is not None,
             "vulnerabilityExamples": rule.vulnerability_examples,
             "safeExamples": rule.safe_examples,
@@ -506,17 +568,30 @@ class EnhancedConfigAnalyzer:
             ] if rule.logical_conditions else []
         }
     
-    def get_supported_device_types(self) -> List[str]:
-        """지원되는 장비 타입 목록 반환"""
+    def get_supported_device_types(self, framework: str = None) -> List[str]:
+        """지원되는 장비 타입 목록 반환 (다중 지침서 지원)"""
+        target_framework = framework or self.default_framework
+        
+        try:
+            rules_dict = load_rules(target_framework)
+        except (ValueError, NotImplementedError):
+            rules_dict = self.rules
+        
         device_types = set()
-        for rule in self.rules.values():
+        for rule in rules_dict.values():
             device_types.update(rule.device_types)
         return sorted(list(device_types))
     
+    def get_supported_frameworks(self) -> List[str]:
+        """지원되는 지침서 목록 반환"""
+        return list(get_supported_sources().keys())
+    
     def get_analysis_statistics(self) -> Dict[str, Any]:
-        """분석 엔진 통계 반환"""
+        """분석 엔진 통계 반환 (다중 지침서 지원)"""
         return {
             "analysisStats": self.analysis_stats,
+            "defaultFramework": self.default_framework,
+            "supportedFrameworks": self.get_supported_frameworks(),
             "totalRules": len(self.rules),
             "logicalRules": sum(1 for rule in self.rules.values() if rule.logical_check_function),
             "patternRules": sum(1 for rule in self.rules.values() if rule.patterns and not rule.logical_check_function),
@@ -566,9 +641,14 @@ class EnhancedConfigAnalyzer:
         
         return errors
     
-    def analyze_single_line(self, line: str, device_type: str, rule_ids: Optional[List[str]] = None) -> List[VulnerabilityIssue]:
-        """단일 라인 분석 (디버깅/테스트용) - 강화된 버전"""
-        applicable_rules = get_rules_by_device_type(device_type)
+    def analyze_single_line(self, line: str, device_type: str, rule_ids: Optional[List[str]] = None, framework: str = None) -> List[VulnerabilityIssue]:
+        """단일 라인 분석 (디버깅/테스트용) - 다중 지침서 지원"""
+        target_framework = framework or self.default_framework
+        
+        try:
+            applicable_rules = get_rules_by_device_type(target_framework, device_type)
+        except (ValueError, NotImplementedError):
+            applicable_rules = get_rules_by_device_type("KISA", device_type)
         
         if rule_ids:
             applicable_rules = {
@@ -600,6 +680,17 @@ class EnhancedConfigAnalyzer:
                 vulnerabilities.extend(pattern_vulns)
         
         return vulnerabilities
+    
+    def switch_framework(self, framework: str):
+        """기본 지침서 변경"""
+        try:
+            new_rules = load_rules(framework.upper())
+            self.default_framework = framework.upper()
+            self.rules = new_rules
+            self.logger.info(f"기본 지침서를 '{self.default_framework}'로 변경: {len(self.rules)}개 룰")
+        except (ValueError, NotImplementedError) as e:
+            self.logger.error(f"지침서 '{framework}' 변경 실패: {e}")
+            raise
 
 
 # 기존 호환성을 위한 별칭

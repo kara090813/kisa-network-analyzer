@@ -9,6 +9,7 @@ main.py - Flask 애플리케이션 메인 파일
 - 기존 정규식 매칭 + 새로운 논리 기반 판단 하이브리드 분석
 - KISA 가이드 기반 보안 취약점 탐지
 - REST API 형태로 서비스 제공
+- 다중 지침서 지원 (KISA, CIS, NIST 등 확장 가능)
 """
 
 import os
@@ -27,6 +28,14 @@ from models.analysis_response import AnalysisResponse
 from utils.validation import validate_request
 from utils.logger import setup_logger
 
+# 새로운 룰 로더 시스템 import
+from rules.loader import (
+    load_rules, 
+    get_supported_sources, 
+    get_source_info,
+    get_statistics as get_rule_statistics
+)
+
 # Flask 애플리케이션 초기화
 app = Flask(__name__)
 CORS(app)  # CORS 설정 (프론트엔드 연동을 위해)
@@ -38,30 +47,34 @@ logger = setup_logger(__name__)
 analyzer = EnhancedConfigAnalyzer()
 
 # API 버전 정보
-API_VERSION = "1.1.0"  # 논리 기반 분석 추가로 버전 업데이트
-ANALYSIS_ENGINE_VERSION = "Enhanced 2.0"
+API_VERSION = "1.2.0"  # 다중 지침서 지원으로 버전 업데이트
+ANALYSIS_ENGINE_VERSION = "Enhanced 2.1"
 
 
 @app.route('/api/v1/health', methods=['GET'])
 def health_check():
     """
-    API 상태 확인 엔드포인트 (강화된 정보 포함)
+    API 상태 확인 엔드포인트 (다중 지침서 지원 정보 포함)
     """
     try:
         analysis_stats = analyzer.get_analysis_statistics()
+        supported_sources = get_supported_sources()
         
         return jsonify({
             "status": "healthy",
             "version": API_VERSION,
             "engineVersion": ANALYSIS_ENGINE_VERSION,
             "timestamp": datetime.now().isoformat(),
-            "service": "KISA Network Security Config Analyzer (Enhanced)",
+            "service": "KISA Network Security Config Analyzer (Enhanced Multi-Framework)",
             "features": {
                 "logicalAnalysis": True,
                 "patternMatching": True,
                 "hybridAnalysis": True,
-                "contextualParsing": True
+                "contextualParsing": True,
+                "multiFrameworkSupport": True
             },
+            "supportedFrameworks": list(supported_sources.keys()),
+            "frameworkDetails": supported_sources,
             "statistics": analysis_stats
         })
     except Exception as e:
@@ -71,15 +84,60 @@ def health_check():
             "version": API_VERSION,
             "engineVersion": ANALYSIS_ENGINE_VERSION,
             "timestamp": datetime.now().isoformat(),
-            "service": "KISA Network Security Config Analyzer (Enhanced)",
+            "service": "KISA Network Security Config Analyzer (Enhanced Multi-Framework)",
             "error": str(e)
         }), 500
 
 
-@app.route('/api/v1/rules', methods=['GET'])
-def get_rules():
+@app.route('/api/v1/frameworks', methods=['GET'])
+def get_frameworks():
     """
-    사용 가능한 룰셋 목록 조회 (강화된 정보 포함)
+    지원되는 보안 지침서(프레임워크) 목록 조회
+    """
+    try:
+        supported_sources = get_supported_sources()
+        frameworks_info = []
+        
+        for source, info in supported_sources.items():
+            # 각 지침서별 통계 정보 추가
+            try:
+                stats = get_rule_statistics(source)
+                framework_info = {
+                    "id": source,
+                    **info,
+                    "statistics": stats,
+                    "isImplemented": stats["totalRules"] > 0
+                }
+            except (NotImplementedError, ValueError):
+                framework_info = {
+                    "id": source,
+                    **info,
+                    "statistics": {"totalRules": 0},
+                    "isImplemented": False
+                }
+            
+            frameworks_info.append(framework_info)
+        
+        return jsonify({
+            "success": True,
+            "totalFrameworks": len(frameworks_info),
+            "implementedFrameworks": sum(1 for f in frameworks_info if f["isImplemented"]),
+            "frameworks": frameworks_info
+        })
+        
+    except Exception as e:
+        logger.error(f"지침서 목록 조회 중 오류 발생: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": "지침서 목록 조회 실패",
+            "details": str(e)
+        }), 500
+
+
+@app.route('/api/v1/frameworks/<framework_id>/rules', methods=['GET'])
+def get_framework_rules(framework_id):
+    """
+    특정 지침서의 룰 목록 조회
     """
     try:
         # 쿼리 파라미터 처리
@@ -87,7 +145,43 @@ def get_rules():
         device_type = request.args.get('deviceType')
         severity = request.args.get('severity')
         
-        rules = analyzer.get_available_rules()
+        # 지침서별 룰 로드
+        try:
+            rules_dict = load_rules(framework_id.upper())
+        except ValueError as e:
+            return jsonify({
+                "success": False,
+                "error": str(e)
+            }), 404
+        except NotImplementedError as e:
+            return jsonify({
+                "success": False,
+                "error": f"{framework_id.upper()} 지침서는 아직 구현되지 않았습니다.",
+                "details": str(e)
+            }), 501
+        
+        # 룰 정보를 리스트로 변환
+        rules = []
+        for rule_id, rule in rules_dict.items():
+            rule_info = {
+                "ruleId": rule.rule_id,
+                "title": rule.title,
+                "description": rule.description,
+                "severity": rule.severity,
+                "category": rule.category.value,  
+                "deviceTypes": rule.device_types,
+                "reference": rule.reference,
+                "hasLogicalAnalysis": rule.logical_check_function is not None,
+            }
+            
+            if include_examples:
+                rule_info.update({
+                    "vulnerabilityExamples": rule.vulnerability_examples,
+                    "safeExamples": rule.safe_examples,
+                    "heuristicRules": rule.heuristic_rules
+                })
+            
+            rules.append(rule_info)
         
         # 필터 적용
         if device_type:
@@ -96,15 +190,90 @@ def get_rules():
         if severity:
             rules = [rule for rule in rules if rule['severity'] == severity]
         
-        # 예제 정보 제거 (요청하지 않은 경우)
-        if not include_examples:
-            for rule in rules:
-                rule.pop('vulnerabilityExamples', None)
-                rule.pop('safeExamples', None)
-                rule.pop('heuristicRules', None)
+        return jsonify({
+            "success": True,
+            "framework": framework_id.upper(),
+            "totalRules": len(rules),
+            "filters": {
+                "deviceType": device_type,
+                "severity": severity,
+                "includeExamples": include_examples
+            },
+            "engineInfo": {
+                "logicalRules": sum(1 for rule in rules if rule.get('hasLogicalAnalysis')),
+                "patternRules": sum(1 for rule in rules if not rule.get('hasLogicalAnalysis'))
+            },
+            "rules": rules
+        })
+        
+    except Exception as e:
+        logger.error(f"지침서 룰 조회 중 오류 발생: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": "지침서 룰 조회 실패",
+            "details": str(e)
+        }), 500
+
+
+@app.route('/api/v1/rules', methods=['GET'])
+def get_rules():
+    """
+    사용 가능한 룰셋 목록 조회 (기본: KISA, 다중 지침서 지원)
+    """
+    try:
+        # 쿼리 파라미터 처리
+        include_examples = request.args.get('includeExamples', 'false').lower() == 'true'
+        device_type = request.args.get('deviceType')
+        severity = request.args.get('severity')
+        framework = request.args.get('framework', 'KISA').upper()  # 기본값: KISA
+        
+        # 지침서별 룰 로드
+        try:
+            rules_dict = load_rules(framework)
+        except ValueError as e:
+            return jsonify({
+                "success": False,
+                "error": str(e)
+            }), 404
+        except NotImplementedError as e:
+            return jsonify({
+                "success": False,
+                "error": f"{framework} 지침서는 아직 구현되지 않았습니다.",
+                "details": str(e)
+            }), 501
+        
+        rules = []
+        for rule_id, rule in rules_dict.items():
+            rule_info = {
+                "ruleId": rule.rule_id,
+                "title": rule.title,
+                "description": rule.description,
+                "severity": rule.severity,
+                "category": rule.category.value,
+                "deviceTypes": rule.device_types,
+                "reference": rule.reference,
+                "hasLogicalAnalysis": rule.logical_check_function is not None,
+            }
+            
+            if include_examples:
+                rule_info.update({
+                    "vulnerabilityExamples": rule.vulnerability_examples,
+                    "safeExamples": rule.safe_examples,
+                    "heuristicRules": rule.heuristic_rules
+                })
+            
+            rules.append(rule_info)
+        
+        # 필터 적용
+        if device_type:
+            rules = [rule for rule in rules if device_type in rule['deviceTypes']]
+        
+        if severity:
+            rules = [rule for rule in rules if rule['severity'] == severity]
         
         return jsonify({
             "success": True,
+            "framework": framework,
             "totalRules": len(rules),
             "filters": {
                 "deviceType": device_type,
@@ -129,12 +298,13 @@ def get_rules():
 @app.route('/api/v1/config-analyze', methods=['POST'])
 def analyze_config():
     """
-    네트워크 장비 설정 파일 분석 메인 엔드포인트 (강화된 분석)
+    네트워크 장비 설정 파일 분석 메인 엔드포인트 (다중 지침서 지원)
     
     Request Body:
     {
         "deviceType": "Cisco",
         "configText": "<config 파일 전체 텍스트>",
+        "framework": "KISA",  // 새로운 필드: 사용할 지침서
         "options": {
             "checkAllRules": true,
             "specificRuleIds": ["N-01", "N-04"],
@@ -144,19 +314,6 @@ def analyze_config():
             "analysisMode": "hybrid"  // "pattern", "logical", "hybrid"
         }
     }
-    
-    Response:
-    {
-        "deviceType": "Cisco",
-        "totalLines": 120,  
-        "issuesFound": 3,
-        "engineVersion": "Enhanced 2.0",
-        "analysisMode": "hybrid",
-        "analysisTime": 0.45,
-        "results": [...],
-        "statistics": {...},
-        "contextInfo": {...}
-    }
     """
     try:
         # 요청 데이터 검증
@@ -165,6 +322,25 @@ def analyze_config():
                 "success": False,
                 "error": "JSON 데이터가 필요합니다"
             }), 400
+        
+        # 지침서 파라미터 처리
+        framework = request.json.get('framework', 'KISA').upper()
+        
+        # 지침서 유효성 검증
+        try:
+            framework_rules = load_rules(framework)
+        except ValueError as e:
+            return jsonify({
+                "success": False,
+                "error": f"지원되지 않는 지침서입니다: {framework}",
+                "details": str(e)
+            }), 400
+        except NotImplementedError as e:
+            return jsonify({
+                "success": False,
+                "error": f"{framework} 지침서는 아직 구현되지 않았습니다.",
+                "details": str(e)
+            }), 501
         
         # 요청 객체 생성 및 검증
         try:
@@ -190,16 +366,18 @@ def analyze_config():
         
         # 로깅
         config_lines_count = len(analysis_request.config_text.splitlines())
-        logger.info(f"강화된 분석 요청 수신 - 장비 타입: {analysis_request.device_type}, "
+        logger.info(f"다중 지침서 분석 요청 수신 - 지침서: {framework}, "
+                   f"장비 타입: {analysis_request.device_type}, "
                    f"설정 라인 수: {config_lines_count}, 분석 모드: {analysis_mode}")
         
-        # 설정 파일 분석 실행 (강화된 분석기 사용)
+        # 분석기에 사용할 지침서 설정 (향후 분석기 확장 시 사용)
+        # 현재는 KISA만 지원하므로 기본 분석 실행
         analysis_result = analyzer.analyze_config(analysis_request)
         
         # 컨텍스트 정보 추가 (강화된 정보)
         context_info = _extract_context_info(analysis_request.config_text, analysis_request.device_type)
         
-        # 응답 생성 (강화된 정보 포함)
+        # 응답 생성 (다중 지침서 정보 포함)
         response = AnalysisResponse(
             device_type=analysis_request.device_type,
             total_lines=config_lines_count,
@@ -212,13 +390,16 @@ def analyze_config():
         # 응답 딕셔너리 생성 및 강화된 정보 추가
         response_dict = response.to_dict()
         response_dict.update({
+            "framework": framework,
+            "frameworkInfo": get_source_info(framework),
             "engineVersion": ANALYSIS_ENGINE_VERSION,
             "analysisMode": analysis_mode,
             "contextInfo": context_info,
             "validationWarnings": validation_result.warnings if hasattr(validation_result, 'warnings') else []
         })
         
-        logger.info(f"강화된 분석 완료 - 발견된 취약점: {response.issues_found}개, "
+        logger.info(f"다중 지침서 분석 완료 - 지침서: {framework}, "
+                   f"발견된 취약점: {response.issues_found}개, "
                    f"분석 시간: {analysis_result.analysis_time:.2f}초")
         
         return jsonify(response_dict)
@@ -230,40 +411,81 @@ def analyze_config():
             "success": False,
             "error": "설정 분석 실패",
             "details": str(e),
-            "engineVersion": ANALYSIS_ENGINE_VERSION
+            "engineVersion": ANALYSIS_ENGINE_VERSION,
+            "framework": request.json.get('framework', 'KISA') if request.json else None
         }), 500
 
 
 @app.route('/api/v1/rules/<rule_id>', methods=['GET'])
 def get_rule_detail(rule_id):
     """
-    특정 룰의 상세 정보 조회 (강화된 정보 포함)
+    특정 룰의 상세 정보 조회 (다중 지침서 지원)
     """
     try:
         include_examples = request.args.get('includeExamples', 'true').lower() == 'true'
+        framework = request.args.get('framework', 'KISA').upper()
         
-        rule_detail = analyzer.get_rule_detail(rule_id)
-        if rule_detail:
-            # 예제 정보 제거 (요청하지 않은 경우)
-            if not include_examples:
-                rule_detail.pop('vulnerabilityExamples', None)
-                rule_detail.pop('safeExamples', None)
-                rule_detail.pop('heuristicRules', None)
-                rule_detail.pop('logicalConditions', None)
+        # 지침서별 룰 로드 및 특정 룰 검색
+        try:
+            from rules.loader import get_rule_by_id
+            rule = get_rule_by_id(framework, rule_id)
+        except ValueError as e:
+            return jsonify({
+                "success": False,
+                "error": str(e)
+            }), 404
+        except NotImplementedError as e:
+            return jsonify({
+                "success": False,
+                "error": f"{framework} 지침서는 아직 구현되지 않았습니다.",
+                "details": str(e)
+            }), 501
+        
+        if rule:
+            rule_detail = {
+                "ruleId": rule.rule_id,
+                "title": rule.title,
+                "description": rule.description,
+                "severity": rule.severity,
+                "category": rule.category.value,
+                "deviceTypes": rule.device_types,
+                "patterns": rule.patterns,
+                "negativePatterns": rule.negative_patterns,
+                "recommendation": rule.recommendation,
+                "reference": rule.reference,
+                "hasLogicalAnalysis": rule.logical_check_function is not None,
+                "framework": framework
+            }
+            
+            if include_examples:
+                rule_detail.update({
+                    "vulnerabilityExamples": rule.vulnerability_examples,
+                    "safeExamples": rule.safe_examples,
+                    "heuristicRules": rule.heuristic_rules,
+                    "logicalConditions": [
+                        {
+                            "name": condition.name,
+                            "description": condition.description,
+                            "examples": condition.examples
+                        } for condition in rule.logical_conditions
+                    ] if rule.logical_conditions else []
+                })
             
             return jsonify({
                 "success": True,
+                "framework": framework,
                 "rule": rule_detail,
                 "enhancedInfo": {
                     "hasLogicalAnalysis": rule_detail.get('hasLogicalAnalysis', False),
-                    "complexityLevel": "High" if rule_detail.get('logicalConditions') else "Medium"
+                    "complexityLevel": "High" if rule.logical_conditions else "Medium"
                 }
             })
         else:
             return jsonify({
                 "success": False,
-                "error": f"룰 '{rule_id}'를 찾을 수 없습니다"
+                "error": f"룰 '{rule_id}'를 {framework} 지침서에서 찾을 수 없습니다"
             }), 404
+            
     except Exception as e:
         logger.error(f"룰 상세정보 조회 중 오류 발생: {str(e)}")
         return jsonify({
@@ -276,18 +498,38 @@ def get_rule_detail(rule_id):
 @app.route('/api/v1/device-types', methods=['GET'])
 def get_supported_device_types():
     """
-    지원되는 장비 타입 목록 조회 (강화된 정보 포함)
+    지원되는 장비 타입 목록 조회 (다중 지침서 지원)
     """
     try:
-        device_types = analyzer.get_supported_device_types()
+        framework = request.args.get('framework', 'KISA').upper()
+        
+        try:
+            framework_rules = load_rules(framework)
+        except ValueError as e:
+            return jsonify({
+                "success": False,
+                "error": str(e)
+            }), 404
+        except NotImplementedError as e:
+            return jsonify({
+                "success": False,
+                "error": f"{framework} 지침서는 아직 구현되지 않았습니다.",
+                "details": str(e)
+            }), 501
+        
+        # 지원되는 장비 타입 추출
+        device_types = set()
+        for rule in framework_rules.values():
+            device_types.update(rule.device_types)
+        device_types = sorted(list(device_types))
         
         # 각 장비 타입별 지원 기능 정보
         device_info = {}
         for device_type in device_types:
-            applicable_rules = len([rule for rule in analyzer.get_available_rules() 
-                                 if device_type in rule['deviceTypes']])
-            logical_rules = len([rule for rule in analyzer.get_available_rules() 
-                               if device_type in rule['deviceTypes'] and rule.get('hasLogicalAnalysis')])
+            applicable_rules = len([rule for rule in framework_rules.values() 
+                                 if device_type in rule.device_types])
+            logical_rules = len([rule for rule in framework_rules.values() 
+                               if device_type in rule.device_types and rule.logical_check_function])
             
             device_info[device_type] = {
                 "supportedRules": applicable_rules,
@@ -301,6 +543,7 @@ def get_supported_device_types():
         
         return jsonify({
             "success": True,
+            "framework": framework,
             "deviceTypes": device_types,
             "deviceInfo": device_info,
             "totalDeviceTypes": len(device_types)
@@ -317,13 +560,7 @@ def get_supported_device_types():
 @app.route('/api/v1/config-validate', methods=['POST'])
 def validate_config():
     """
-    설정 파일 문법 검증 엔드포인트 (새로운 기능)
-    
-    Request Body:
-    {
-        "deviceType": "Cisco",
-        "configText": "<config 파일 전체 텍스트>"
-    }
+    설정 파일 문법 검증 엔드포인트
     """
     try:
         if not request.json:
@@ -366,13 +603,6 @@ def validate_config():
 def analyze_single_line():
     """
     단일 라인 분석 엔드포인트 (디버깅/테스트용)
-    
-    Request Body:
-    {
-        "line": "enable password cisco",
-        "deviceType": "Cisco",
-        "ruleIds": ["N-01"]  // 선택사항
-    }
     """
     try:
         if not request.json:
@@ -384,6 +614,7 @@ def analyze_single_line():
         line = request.json.get('line')
         device_type = request.json.get('deviceType')
         rule_ids = request.json.get('ruleIds')
+        framework = request.json.get('framework', 'KISA').upper()
         
         if not line or not device_type:
             return jsonify({
@@ -391,11 +622,12 @@ def analyze_single_line():
                 "error": "line과 deviceType이 필요합니다"
             }), 400
         
-        # 단일 라인 분석 실행
+        # 단일 라인 분석 실행 (현재는 KISA만 지원)
         vulnerabilities = analyzer.analyze_single_line(line, device_type, rule_ids)
         
         return jsonify({
             "success": True,
+            "framework": framework,
             "line": line,
             "deviceType": device_type,
             "appliedRules": rule_ids or "all",
@@ -415,14 +647,25 @@ def analyze_single_line():
 @app.route('/api/v1/statistics', methods=['GET'])
 def get_analysis_statistics():
     """
-    분석 엔진 통계 정보 조회 (새로운 기능)
+    분석 엔진 통계 정보 조회 (다중 지침서 지원)
     """
     try:
-        stats = analyzer.get_analysis_statistics()
+        framework = request.args.get('framework', 'KISA').upper()
+        
+        # 분석 엔진 통계
+        engine_stats = analyzer.get_analysis_statistics()
+        
+        # 지침서별 룰 통계
+        try:
+            rule_stats = get_rule_statistics(framework)
+        except (ValueError, NotImplementedError):
+            rule_stats = {"totalRules": 0}
         
         return jsonify({
             "success": True,
-            "statistics": stats,
+            "framework": framework,
+            "engineStatistics": engine_stats,
+            "ruleStatistics": rule_stats,
             "timestamp": datetime.now().isoformat()
         })
         
@@ -438,7 +681,7 @@ def get_analysis_statistics():
 def _extract_context_info(config_text: str, device_type: str) -> Dict[str, Any]:
     """설정 파일에서 컨텍스트 정보 추출"""
     try:
-        from rules.security_rules import parse_config_context
+        from rules.kisa_rules import parse_config_context
         context = parse_config_context(config_text, device_type)
         
         return {
@@ -514,8 +757,9 @@ if __name__ == '__main__':
     debug = os.environ.get('FLASK_ENV') != 'production'
     
     # 시작 로그
-    logger.info(f"KISA 네트워크 보안 분석 API 시작 - Enhanced Version {API_VERSION}")
+    logger.info(f"KISA 네트워크 보안 분석 API 시작 - Enhanced Multi-Framework Version {API_VERSION}")
     logger.info(f"분석 엔진: {ANALYSIS_ENGINE_VERSION}")
+    logger.info(f"지원 지침서: {', '.join(get_supported_sources().keys())}")
     logger.info(f"포트: {port}, 디버그 모드: {debug}")
     
     app.run(
