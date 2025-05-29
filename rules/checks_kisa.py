@@ -12,7 +12,7 @@ import re
 
 
 def check_basic_password_usage(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """N-01: 기본 패스워드 사용 - 완전한 논리 기반 분석"""
+    """N-01: 기본 패스워드 사용 - 완전한 논리 기반 분석 (최신 장비 지원)"""
     vulnerabilities = []
     
     # 기본 패스워드 패턴들 (확장)
@@ -33,14 +33,18 @@ def check_basic_password_usage(line: str, line_num: int, context: ConfigContext)
                     'password_type': 'enable_password',
                     'vulnerability': 'basic_password_used',
                     'password_value': password_value,
-                    'recommendation': 'Use enable secret with strong password'
+                    'recommendation': 'Use enable secret with strong password or algorithm-type'
                 }
             })
     
-    # 사용자 패스워드 검사
+    # 사용자 패스워드 검사 (최신 버전 고려)
     for user in context.parsed_users:
+        # 최신 암호화를 사용하는 경우는 양호
+        if user.get('is_modern_encryption', False):
+            continue
+            
+        # 기본 패스워드 사용 여부 확인
         if user['has_password'] and not user['password_encrypted']:
-            # 사용자명과 패스워드가 같은 경우도 체크
             if user['username'].lower() in basic_passwords:
                 vulnerabilities.append({
                     'line': user['line_number'],
@@ -48,9 +52,24 @@ def check_basic_password_usage(line: str, line_num: int, context: ConfigContext)
                     'details': {
                         'password_type': 'user_password',
                         'vulnerability': 'username_as_password',
-                        'username': user['username']
+                        'username': user['username'],
+                        'recommendation': 'Use username secret with algorithm-type sha256 or scrypt'
                     }
                 })
+        
+        # 약한 암호화 사용 경고
+        elif user.get('encryption_type') in ['type7_weak', 'type0_plaintext']:
+            vulnerabilities.append({
+                'line': user['line_number'],
+                'matched_text': f"username {user['username']} using weak encryption",
+                'details': {
+                    'password_type': 'user_password',
+                    'vulnerability': 'weak_encryption_used',
+                    'username': user['username'],
+                    'encryption_type': user.get('encryption_type'),
+                    'recommendation': 'Upgrade to algorithm-type sha256 or scrypt encryption'
+                }
+            })
     
     return vulnerabilities
 
@@ -88,7 +107,7 @@ def check_password_complexity(line: str, line_num: int, context: ConfigContext) 
 
 
 def check_password_encryption(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """N-03: 암호화된 패스워드 사용 - 논리 기반 분석"""
+    """N-03: 암호화된 패스워드 사용 - 논리 기반 분석 (최신 장비 지원)"""
     vulnerabilities = []
     
     # Service password-encryption 확인
@@ -101,32 +120,53 @@ def check_password_encryption(line: str, line_num: int, context: ConfigContext) 
             'matched_text': 'enable password (not secret)',
             'details': {
                 'vulnerability': 'enable_password_not_secret',
-                'recommendation': 'Use enable secret instead'
+                'recommendation': 'Use enable secret with algorithm-type sha256 or enable algorithm-type scrypt secret'
             }
         })
     
-    # 암호화되지 않은 사용자 패스워드 확인
+    # 사용자 패스워드 암호화 검사
     for user in context.parsed_users:
+        user_issues = []
+        
+        # 최신 강력한 암호화를 사용하는 경우는 양호
+        if user.get('is_modern_encryption', False):
+            continue
+        
+        # 암호화되지 않은 패스워드
         if user['has_password'] and not user['password_encrypted']:
+            user_issues.append('unencrypted_password')
+        
+        # 약한 암호화 사용
+        elif user.get('encryption_type') == 'type7_weak':
+            user_issues.append('weak_type7_encryption')
+        
+        # 플레인텍스트 (Type 0)
+        elif user.get('encryption_type') == 'type0_plaintext':
+            user_issues.append('plaintext_password')
+        
+        # 오래된 MD5 암호화만 사용
+        elif user.get('encryption_type') == 'type5_md5' and not user.get('algorithm_type'):
+            user_issues.append('outdated_md5_only')
+        
+        if user_issues:
+            recommendation = "Use username secret with algorithm-type sha256 or scrypt for modern security"
+            if 'weak_type7_encryption' in user_issues:
+                recommendation = "Replace Type 7 encryption with algorithm-type sha256 secret"
+            elif 'outdated_md5_only' in user_issues:
+                recommendation = "Consider upgrading from MD5 to algorithm-type sha256 for better security"
+            
             vulnerabilities.append({
                 'line': user['line_number'],
-                'matched_text': f"username {user['username']} password (unencrypted)",
+                'matched_text': f"username {user['username']} password encryption issue",
                 'details': {
-                    'vulnerability': 'unencrypted_user_password',
+                    'vulnerability': 'password_encryption_insufficient',
                     'username': user['username'],
-                    'recommendation': 'Use username secret or enable service password-encryption'
+                    'issues': user_issues,
+                    'current_encryption': user.get('encryption_type', 'none'),
+                    'algorithm_type': user.get('algorithm_type'),
+                    'recommendation': recommendation
                 }
             })
-    
-    if not password_encryption_enabled and any(not user['password_encrypted'] for user in context.parsed_users):
-        vulnerabilities.append({
-            'line': 0,
-            'matched_text': 'service password-encryption not enabled',
-            'details': {
-                'vulnerability': 'password_encryption_disabled',
-                'recommendation': 'Enable service password-encryption'
-            }
-        })
     
     return vulnerabilities
 

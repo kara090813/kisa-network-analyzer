@@ -200,9 +200,68 @@ def _parse_cisco_config_complete(context: ConfigContext):
                     'has_password': 'password' in line,
                     'has_secret': 'secret' in line,
                     'privilege_level': 1,
-                    'password_encrypted': False
+                    'password_encrypted': False,
+                    'encryption_type': None,
+                    'algorithm_type': None,
+                    'is_modern_encryption': False
                 }
                 
+                # 권한 레벨 파싱
+                if 'privilege' in line:
+                    try:
+                        priv_idx = user_parts.index('privilege')
+                        if priv_idx + 1 < len(user_parts):
+                            user_info['privilege_level'] = int(user_parts[priv_idx + 1])
+                    except:
+                        pass
+                
+                # 최신 algorithm-type 확인
+                if 'algorithm-type' in line:
+                    try:
+                        algo_idx = user_parts.index('algorithm-type')
+                        if algo_idx + 1 < len(user_parts):
+                            algorithm = user_parts[algo_idx + 1]
+                            user_info['algorithm_type'] = algorithm
+                            # 강력한 암호화 알고리즘 확인
+                            if algorithm.lower() in ['sha256', 'scrypt', 'pbkdf2']:
+                                user_info['is_modern_encryption'] = True
+                                user_info['password_encrypted'] = True
+                    except:
+                        pass
+                
+                # 암호화 타입 확인 (기존 방식)
+                if 'password' in line:
+                    if '$' in line or ' 7 ' in line or ' 0 ' in line:
+                        user_info['password_encrypted'] = True
+                        # 암호화 타입 식별
+                        if ' 9 $' in line:  # Type 9 (scrypt)
+                            user_info['encryption_type'] = 'type9_scrypt'
+                            user_info['is_modern_encryption'] = True
+                        elif ' 8 $' in line:  # Type 8 (PBKDF2)
+                            user_info['encryption_type'] = 'type8_pbkdf2'  
+                            user_info['is_modern_encryption'] = True
+                        elif ' 5 $' in line:  # Type 5 (MD5)
+                            user_info['encryption_type'] = 'type5_md5'
+                        elif ' 7 ' in line:  # Type 7 (weak)
+                            user_info['encryption_type'] = 'type7_weak'
+                        elif ' 0 ' in line:  # Type 0 (plaintext)
+                            user_info['encryption_type'] = 'type0_plaintext'
+                            user_info['password_encrypted'] = False
+                
+                elif 'secret' in line:
+                    user_info['password_encrypted'] = True
+                    # Secret의 경우 기본적으로 MD5 이상
+                    if ' 9 $' in line:
+                        user_info['encryption_type'] = 'type9_scrypt'
+                        user_info['is_modern_encryption'] = True
+                    elif ' 8 $' in line:
+                        user_info['encryption_type'] = 'type8_pbkdf2'
+                        user_info['is_modern_encryption'] = True
+                    elif ' 5 $' in line or '$1$' in line:
+                        user_info['encryption_type'] = 'type5_md5'
+                
+                context.parsed_users.append(user_info)
+        
                 if 'privilege' in line:
                     try:
                         priv_idx = user_parts.index('privilege')
