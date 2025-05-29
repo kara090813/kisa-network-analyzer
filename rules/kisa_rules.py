@@ -250,14 +250,20 @@ def _parse_cisco_config_complete(context: ConfigContext):
                 
                 elif 'secret' in line:
                     user_info['password_encrypted'] = True
-                    # Secret의 경우 기본적으로 MD5 이상
-                    if ' 9 $' in line:
+                    # Secret 타입별 암호화 방식 확인
+                    if re.search(r'secret\s+9\s+\$', line):  # Type 9 (scrypt)
                         user_info['encryption_type'] = 'type9_scrypt'
                         user_info['is_modern_encryption'] = True
-                    elif ' 8 $' in line:
+                    elif re.search(r'secret\s+8\s+\$', line):  # Type 8 (PBKDF2)
                         user_info['encryption_type'] = 'type8_pbkdf2'
                         user_info['is_modern_encryption'] = True
-                    elif ' 5 $' in line or '$1$' in line:
+                    elif re.search(r'secret\s+5\s+\$', line) or '$1$' in line:  # Type 5 (MD5)
+                        user_info['encryption_type'] = 'type5_md5'
+                    elif re.search(r'secret\s+0\s+', line):  # Type 0 (plaintext)
+                        user_info['encryption_type'] = 'type0_plaintext'
+                        user_info['password_encrypted'] = False
+                    else:
+                        # 기본 secret (보통 Type 5)
                         user_info['encryption_type'] = 'type5_md5'
                 
                 context.parsed_users.append(user_info)

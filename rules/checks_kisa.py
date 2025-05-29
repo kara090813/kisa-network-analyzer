@@ -131,6 +131,10 @@ def check_password_encryption(line: str, line_num: int, context: ConfigContext) 
         # 최신 강력한 암호화를 사용하는 경우는 양호
         if user.get('is_modern_encryption', False):
             continue
+            
+        # Type 5 MD5 secret도 허용 (기본적으로 안전)
+        if user.get('encryption_type') == 'type5_md5' and user['has_secret']:
+            continue
         
         # 암호화되지 않은 패스워드
         if user['has_password'] and not user['password_encrypted']:
