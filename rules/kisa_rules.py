@@ -138,8 +138,10 @@ def _parse_cisco_config_complete(context: ConfigContext):
             interface_config['config_lines'].append(line)
             
             # 인터페이스 속성 분석
-            if line.startswith('ip address'):
+            if line.startswith('ip address') and not line.startswith('no ip address'):
                 interface_config['has_ip_address'] = True
+            elif line.startswith('no ip address'):
+                interface_config['has_ip_address'] = False
             elif line.startswith('description'):
                 interface_config['has_description'] = True
                 interface_config['description'] = line.split('description ', 1)[1] if len(line.split('description ', 1)) > 1 else ''
