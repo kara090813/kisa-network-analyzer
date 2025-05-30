@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NW-23 룰 디버깅 어드민</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+        }
+        
+        .header p {
+            opacity: 0.9;
+            font-size: 1.1em;
+        }
+        
+        .content {
+            padding: 40px;
+        }
+        
+        .section {
+            margin-bottom: 40px;
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.08);
+            border-left: 5px solid #667eea;
+        }
+        
+        .section h2 {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 1.5em;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .emoji {
+            font-size: 1.2em;
+        }
+        
+        .form-group {
+            margin-bottom: 25px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #555;
+            font-size: 1.1em;
+        }
+        
+        input, select, textarea {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid #e1e5e9;
+            border-radius: 10px;
+            font-size: 14px;
+            transition: all 0.3s ease;
+            font-family: 'Consolas', 'Monaco', monospace;
+        }
+        
+        input:focus, select:focus, textarea:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        
+        textarea {
+            resize: vertical;
+            min-height: 120px;
+        }
+        
+        .config-textarea {
+            min-height: 300px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 12px;
+            line-height: 1.4;
+        }
+        
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+        }
+        
+        button:active {
+            transform: translateY(0);
+        }
+        
+        .quick-test-buttons {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+        
+        .quick-btn {
+            padding: 20px;
+            background: linear-gradient(135deg, #84fab0 0%, #8fd3f4 100%);
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-align: center;
+            color: #333;
+            font-weight: 600;
+        }
+        
+        .quick-btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+        }
+        
+        #response {
+            margin-top: 30px;
+            padding: 25px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            border-left: 5px solid #28a745;
+            min-height: 100px;
+            white-space: pre-wrap;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 13px;
+            line-height: 1.5;
+            max-height: 500px;
+            overflow-y: auto;
+        }
+        
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+        
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .error {
+            border-left-color: #dc3545 !important;
+            background: #f8d7da !important;
+            color: #721c24;
+        }
+        
+        .success {
+            border-left-color: #28a745 !important;
+            background: #d4edda !important;
+            color: #155724;
+        }
+        
+        .warning {
+            border-left-color: #ffc107 !important;
+            background: #fff3cd !important;
+            color: #856404;
+        }
+        
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        
+        .status-ok { background: #28a745; }
+        .status-error { background: #dc3545; }
+        .status-warning { background: #ffc107; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔍 NW-23 룰 디버깅 어드민</h1>
+            <p>네트워크 보안 룰 테스트 및 디버깅 도구</p>
+        </div>
+        
+        <div class="content">
+            <!-- API 설정 섹션 -->
+            <div class="section">
+                <h2><span class="emoji">⚙️</span> API 서버 설정</h2>
+                <div class="form-group">
+                    <label for="apiUrl">API 서버 URL:</label>
+                    <input type="text" id="apiUrl" placeholder="https://your-api-server.com/api/analyze" value="">
+                </div>
+                <div class="form-group">
+                    <label for="apiKey">API 키 (선택사항):</label>
+                    <input type="text" id="apiKey" placeholder="API 키를 입력하세요">
+                </div>
+            </div>
+            
+            <!-- 빠른 테스트 섹션 -->
+            <div class="section">
+                <h2><span class="emoji">🚀</span> 빠른 디버깅 테스트</h2>
+                <p style="margin-bottom: 20px; color: #666;">단계별 디버깅을 위한 미리 정의된 테스트들:</p>
+                
+                <div class="quick-test-buttons">
+                    <div class="quick-btn" onclick="runQuickTest('step1')">
+                        <div style="font-size: 1.5em; margin-bottom: 10px;">🔍</div>
+                        <div>1단계: 함수 호출 확인</div>
+                        <div style="font-size: 0.9em; opacity: 0.8; margin-top: 5px;">NW-23 함수가 실행되는지 확인</div>
+                    </div>
+                    
+                    <div class="quick-btn" onclick="runQuickTest('step2')">
+                        <div style="font-size: 1.5em; margin-bottom: 10px;">📊</div>
+                        <div>2단계: Context 구조 분석</div>
+                        <div style="font-size: 0.9em; opacity: 0.8; margin-top: 5px;">parsed_interfaces 상태 확인</div>
+                    </div>
+                    
+                    <div class="quick-btn" onclick="runQuickTest('step3')">
+                        <div style="font-size: 1.5em; margin-bottom: 10px;">🎯</div>
+                        <div>3단계: 특정 인터페이스 찾기</div>
+                        <div style="font-size: 0.9em; opacity: 0.8; margin-top: 5px;">GigabitEthernet0/2 분석</div>
+                    </div>
+                    
+                    <div class="quick-btn" onclick="runQuickTest('step4')">
+                        <div style="font-size: 1.5em; margin-bottom: 10px;">📝</div>
+                        <div>4단계: 원본 설정 분석</div>
+                        <div style="font-size: 0.9em; opacity: 0.8; margin-top: 5px;">raw config vs parsed 비교</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 커스텀 테스트 섹션 -->
+            <div class="section">
+                <h2><span class="emoji">🛠️</span> 커스텀 테스트</h2>
+                
+                <div class="form-group">
+                    <label for="testType">테스트 유형:</label>
+                    <select id="testType" onchange="updateConfigTemplate()">
+                        <option value="cisco_basic">Cisco 기본 설정</option>
+                        <option value="cisco_complex">Cisco 복잡한 설정</option>
+                        <option value="juniper_basic">Juniper 기본 설정</option>
+                        <option value="custom">커스텀 설정</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="configText">네트워크 장비 설정:</label>
+                    <textarea id="configText" class="config-textarea" placeholder="네트워크 장비 설정을 입력하세요..."></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label for="debugLevel">디버그 레벨:</label>
+                    <select id="debugLevel">
+                        <option value="1">레벨 1: 기본 함수 호출</option>
+                        <option value="2">레벨 2: Context 분석</option>
+                        <option value="3">레벨 3: 인터페이스 상세</option>
+                        <option value="4">레벨 4: 전체 디버그</option>
+                    </select>
+                </div>
+                
+                <button onclick="runCustomTest()">🔍 커스텀 테스트 실행</button>
+            </div>
+            
+            <!-- 결과 섹션 -->
+            <div class="section">
+                <h2><span class="emoji">📋</span> 테스트 결과</h2>
+                
+                <div class="loading" id="loading">
+                    <div class="spinner"></div>
+                    <div>API 요청 처리 중...</div>
+                </div>
+                
+                <div id="response">
+                    여기에 API 응답 결과가 표시됩니다.
+                    
+                    우측 상단의 빠른 테스트 버튼을 클릭하거나, 
+                    커스텀 설정을 입력하여 테스트를 시작하세요.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 설정 템플릿들
+        const configTemplates = {
+            cisco_basic: `Building configuration...
+Current configuration : 2000 bytes
+!
+version 15.2
+service timestamps debug datetime msec
+service timestamps log datetime msec
+no service password-encryption
+!
+hostname Test-Router
+!
+interface GigabitEthernet0/0
+ description Link to ISP
+ ip address 203.0.113.10 255.255.255.252
+ duplex auto
+ speed auto
+!
+interface GigabitEthernet0/1
+ description Internal Network
+ ip address 192.168.1.1 255.255.255.0
+ duplex auto
+ speed auto
+!
+interface GigabitEthernet0/2
+ no ip address
+ duplex auto
+ speed auto
+!
+end`,
+            
+            cisco_complex: `Building configuration...
+Current configuration : 5784 bytes
+!
+version 15.2
+service timestamps debug datetime msec
+service timestamps log datetime msec
+no service password-encryption
+!
+hostname Core-Router
+!
+username netadmin privilege 15 secret 5 $1$fd9K$H7WvLhqKX0Q0NsBnX2iOd1
+!
+interface GigabitEthernet0/0
+ description Link to ISP
+ ip address 203.0.113.10 255.255.255.252
+ ip nat outside
+ ip access-group BLOCK_INBOUND in
+ duplex auto
+ speed auto
+!
+interface GigabitEthernet0/1
+ description Trunk to Core Switch
+ no ip address
+ duplex auto
+ speed auto
+!
+interface GigabitEthernet0/1.10
+ encapsulation dot1Q 10
+ description VLAN 10 - Users
+ ip address 192.168.10.1 255.255.255.0
+ ip nat inside
+!
+interface GigabitEthernet0/2
+ no ip address
+ duplex auto
+ speed auto
+!
+end`,
+            
+            juniper_basic: `version 20.4R3.8;
+system {
+    host-name test-router;
+}
+interfaces {
+    ge-0/0/0 {
+        description "Link to ISP";
+        unit 0 {
+            family inet {
+                address 203.0.113.10/30;
+            }
+        }
+    }
+    ge-0/0/1 {
+        description "Internal Network";
+        unit 0 {
+            family inet {
+                address 192.168.1.1/24;
+            }
+        }
+    }
+    ge-0/0/2 {
+        disable;
+    }
+}`,
+            
+            custom: ''
+        };
+        
+        // 디버그 단계별 요청 데이터
+        const debugSteps = {
+            step1: {
+                title: "1단계: 함수 호출 확인",
+                description: "NW-23 함수가 실제로 호출되는지 확인합니다.",
+                config: configTemplates.cisco_basic,
+                debugLevel: 1
+            },
+            step2: {
+                title: "2단계: Context 구조 분석", 
+                description: "ConfigContext의 parsed_interfaces 상태를 분석합니다.",
+                config: configTemplates.cisco_complex,
+                debugLevel: 2
+            },
+            step3: {
+                title: "3단계: 특정 인터페이스 찾기",
+                description: "GigabitEthernet0/2가 파싱되었는지 확인합니다.",
+                config: configTemplates.cisco_complex,
+                debugLevel: 3
+            },
+            step4: {
+                title: "4단계: 원본 설정 분석",
+                description: "원본 설정과 파싱 결과를 비교 분석합니다.",
+                config: configTemplates.cisco_complex,
+                debugLevel: 4
+            }
+        };
+        
+        // 페이지 로드 시 초기화
+        window.onload = function() {
+            // 기본 API URL 설정 (필요에 따라 수정)
+            document.getElementById('apiUrl').value = 'http://localhost:8000/api/analyze';
+            
+            // 기본 설정 템플릿 로드
+            updateConfigTemplate();
+        };
+        
+        // 설정 템플릿 업데이트
+        function updateConfigTemplate() {
+            const testType = document.getElementById('testType').value;
+            const configText = document.getElementById('configText');
+            
+            if (testType !== 'custom') {
+                configText.value = configTemplates[testType];
+            }
+        }
+        
+        // 빠른 테스트 실행
+        function runQuickTest(stepKey) {
+            const step = debugSteps[stepKey];
+            
+            updateResponse(`🚀 ${step.title} 시작...\n\n${step.description}\n\n테스트 진행 중...`, 'warning');
+            
+            const requestData = {
+                config: step.config,
+                debug_level: step.debugLevel,
+                target_rule: "NW-23",
+                step: stepKey
+            };
+            
+            makeApiRequest(requestData, step.title);
+        }
+        
+        // 커스텀 테스트 실행
+        function runCustomTest() {
+            const configText = document.getElementById('configText').value.trim();
+            const debugLevel = parseInt(document.getElementById('debugLevel').value);
+            
+            if (!configText) {
+                updateResponse('❌ 오류: 네트워크 설정을 입력해주세요.', 'error');
+                return;
+            }
+            
+            updateResponse('🛠️ 커스텀 테스트 시작...\n\n설정 분석 중...', 'warning');
+            
+            const requestData = {
+                config: configText,
+                debug_level: debugLevel,
+                target_rule: "NW-23",
+                step: "custom"
+            };
+            
+            makeApiRequest(requestData, "커스텀 테스트");
+        }
+        
+        // API 요청 실행
+        async function makeApiRequest(requestData, testTitle) {
+            const apiUrl = document.getElementById('apiUrl').value.trim();
+            const apiKey = document.getElementById('apiKey').value.trim();
+            
+            if (!apiUrl) {
+                updateResponse('❌ 오류: API URL을 입력해주세요.', 'error');
+                return;
+            }
+            
+            // 로딩 표시
+            document.getElementById('loading').style.display = 'block';
+            
+            try {
+                const headers = {
+                    'Content-Type': 'application/json',
+                };
+                
+                if (apiKey) {
+                    headers['Authorization'] = `Bearer ${apiKey}`;
+                    // 또는 headers['X-API-Key'] = apiKey;
+                }
+                
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: headers,
+                    body: JSON.stringify(requestData)
+                });
+                
+                const responseText = await response.text();
+                let responseData;
+                
+                try {
+                    responseData = JSON.parse(responseText);
+                } catch (e) {
+                    responseData = responseText;
+                }
+                
+                // 로딩 숨김
+                document.getElementById('loading').style.display = 'none';
+                
+                if (response.ok) {
+                    displayApiResponse(responseData, testTitle, 'success');
+                } else {
+                    displayApiResponse(responseData, testTitle, 'error');
+                }
+                
+            } catch (error) {
+                document.getElementById('loading').style.display = 'none';
+                updateResponse(`❌ 네트워크 오류: ${error.message}\n\nAPI URL을 확인해주세요: ${apiUrl}`, 'error');
+            }
+        }
+        
+        // API 응답 표시
+        function displayApiResponse(data, testTitle, status) {
+            let output = `📊 ${testTitle} 완료 (${new Date().toLocaleTimeString()})\n`;
+            output += `${'='.repeat(60)}\n\n`;
+            
+            if (typeof data === 'string') {
+                output += data;
+            } else {
+                // JSON 데이터를 보기 좋게 포맷
+                if (data.vulnerabilities && Array.isArray(data.vulnerabilities)) {
+                    output += `🔍 발견된 취약점: ${data.vulnerabilities.length}개\n\n`;
+                    
+                    data.vulnerabilities.forEach((vuln, index) => {
+                        output += `${index + 1}. ${vuln.rule || 'Unknown'}: ${vuln.matched_text || vuln.interface_name || 'N/A'}\n`;
+                        output += `   📍 위치: 라인 ${vuln.line || 'N/A'}\n`;
+                        output += `   📝 상세: ${vuln.details?.reason || vuln.reason || 'N/A'}\n`;
+                        
+                        if (vuln.details?.debug_info) {
+                            output += `   🐛 디버그 정보:\n`;
+                            Object.entries(vuln.details.debug_info).forEach(([key, value]) => {
+                                output += `      - ${key}: ${JSON.stringify(value)}\n`;
+                            });
+                        }
+                        
+                        if (vuln.details?.analysis_details) {
+                            output += `   📊 분석 결과:\n`;
+                            Object.entries(vuln.details.analysis_details).forEach(([key, value]) => {
+                                output += `      - ${key}: ${JSON.stringify(value)}\n`;
+                            });
+                        }
+                        
+                        output += `\n`;
+                    });
+                } else {
+                    // 전체 JSON 출력
+                    output += JSON.stringify(data, null, 2);
+                }
+            }
+            
+            updateResponse(output, status);
+        }
+        
+        // 응답 영역 업데이트
+        function updateResponse(content, type = 'success') {
+            const responseDiv = document.getElementById('response');
+            responseDiv.textContent = content;
+            responseDiv.className = type;
+            
+            // 자동 스크롤
+            responseDiv.scrollTop = responseDiv.scrollHeight;
+        }
+        
+        // Enter 키로 API URL 테스트
+        document.getElementById('apiUrl').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                runQuickTest('step1');
+            }
+        });
+    </script>
+</body>
+</html>
