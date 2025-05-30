@@ -570,10 +570,10 @@ def check_nw_23(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
         # 개선된 물리적 인터페이스 판별
         is_physical = _is_physical_interface_enhanced(interface_name, context.device_type)
         
-        # 높은 신뢰도로 미사용 판정 (오탐 방지를 위해 엄격한 기준)
+        # 미사용 인터페이스 판정 (보안 우선 관점)
         is_unused_high_confidence = (
-            usage_analysis['usage_probability'] < 0.15 and 
-            usage_analysis['confidence_level'] > 0.85
+            usage_analysis['usage_probability'] < 0.30 and 
+            usage_analysis['confidence_level'] > 0.70
         )
         
         # 최종 취약점 판정
@@ -671,22 +671,23 @@ def _enhanced_basic_usage_check(interface_name, interface_config, all_interfaces
 
 
 def _analyze_configuration_complexity(interface_config):
-    """설정 복잡도 기반 사용 가능성 분석"""
+    """설정 복잡도 기반 사용 가능성 분석 (보안 중심)"""
     config_lines = interface_config.get('config_lines', [])
     config_text = ' '.join(config_lines).lower()
     
-    # 복잡도 지표들
+    # 실제 사용을 나타내는 중요 지표들 (가중치 조정)
     complexity_scores = {
-        'has_description': 0.25 if interface_config.get('has_description') else 0,
-        'has_speed_duplex': 0.15 if any(kw in config_text for kw in ['speed', 'duplex']) else 0,
-        'has_security_config': 0.20 if any(kw in config_text for kw in ['port-security', 'storm-control']) else 0,
-        'has_qos_config': 0.15 if any(kw in config_text for kw in ['qos', 'service-policy']) else 0,
-        'has_spanning_tree': 0.10 if 'spanning-tree' in config_text else 0,
-        'config_line_density': min(0.15, len(config_lines) * 0.03)
+        'has_ip_address': 0.40 if interface_config.get('has_ip_address') else 0,  # IP가 가장 중요
+        'has_meaningful_description': 0.25 if interface_config.get('has_description') and len(interface_config.get('description', '').strip()) > 0 else 0,
+        'has_security_config': 0.20 if any(kw in config_text for kw in ['port-security', 'storm-control', 'access-group']) else 0,
+        'has_vlan_config': 0.15 if any(kw in config_text for kw in ['switchport', 'vlan', 'trunk']) else 0,
+        'has_qos_config': 0.10 if any(kw in config_text for kw in ['qos', 'service-policy']) else 0,
+        # duplex/speed 설정은 기본 설정으로 낮은 가중치
+        'basic_physical_config': 0.05 if any(kw in config_text for kw in ['speed', 'duplex']) else 0
     }
     
     total_complexity = sum(complexity_scores.values())
-    usage_probability = min(0.95, total_complexity)  # 복잡할수록 사용 중일 가능성 높음
+    usage_probability = total_complexity  # 복잡할수록 사용 중일 가능성 높음
     
     return {
         'usage_probability': usage_probability,
