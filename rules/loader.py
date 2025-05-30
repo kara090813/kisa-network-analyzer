@@ -1,16 +1,16 @@
 # -*- coding: utf-8 -*-
 """
 rules/loader.py
-보안 지침서별 룰셋 로더
+보안 지침서별 룰셋 로더 (NW 지침서 지원 추가)
 
-다양한 보안 지침서(KISA, CIS, NIST 등)의 룰셋을 로드하는 중앙 관리 모듈
+다양한 보안 지침서(KISA, CIS, NW, NIST 등)의 룰셋을 로드하는 중앙 관리 모듈
 """
 
 from typing import Dict, List, Optional, Union
 from .kisa_rules import SecurityRule, RuleCategory
 
 
-# 지원되는 보안 지침서 목록
+# 지원되는 보안 지침서 목록 (NW 지침서 추가)
 SUPPORTED_SOURCES = {
     "KISA": {
         "name": "KISA 네트워크 장비 보안 가이드",
@@ -19,13 +19,19 @@ SUPPORTED_SOURCES = {
         "total_rules": 38,
         "categories": ["계정 관리", "접근 관리", "패치 관리", "로그 관리", "기능 관리"]
     },
-    # 향후 추가될 지침서들
     "CIS": {
         "name": "CIS Controls",
         "description": "Center for Internet Security Controls",
         "version": "v8",
-        "total_rules": 11,  # 구현 예정
-       "categories": ["계정 관리", "접근 관리", "로그 관리"]
+        "total_rules": 11,
+        "categories": ["계정 관리", "접근 관리", "로그 관리"]
+    },
+    "NW": {
+        "name": "NW 네트워크 장비 보안 가이드",
+        "description": "NW 네트워크 장비 보안 점검 가이드라인",
+        "version": "2024",
+        "total_rules": 42,
+        "categories": ["계정 관리", "접근 관리", "패치 관리", "로그 관리", "기능 관리"]
     },
     "NIST": {
         "name": "NIST Cybersecurity Framework",
@@ -42,7 +48,7 @@ def load_rules(source: str) -> Dict[str, SecurityRule]:
     지침서별 보안 룰셋 로드
     
     Args:
-        source: 지침서 이름 ("KISA", "CIS", "NIST" etc)
+        source: 지침서 이름 ("KISA", "CIS", "NW", "NIST" etc)
         
     Returns:
         Dict[str, SecurityRule]: 룰 ID를 키로 하는 보안 룰 딕셔너리
@@ -50,6 +56,7 @@ def load_rules(source: str) -> Dict[str, SecurityRule]:
     Raises:
         ValueError: 지원되지 않는 지침서인 경우
         ImportError: 해당 지침서 모듈을 찾을 수 없는 경우
+        NotImplementedError: 해당 지침서가 아직 구현되지 않은 경우
     """
     source = source.upper()
     
@@ -63,6 +70,9 @@ def load_rules(source: str) -> Dict[str, SecurityRule]:
     elif source == "CIS":
         from .cis_rules import CIS_RULES
         return CIS_RULES
+    elif source == "NW":
+        from .nw_rules import NW_RULES
+        return NW_RULES
     elif source == "NIST":
         # 향후 구현 예정
         raise NotImplementedError("NIST 룰셋은 아직 구현되지 않았습니다.")
@@ -289,6 +299,67 @@ def get_statistics(source: str) -> Dict[str, Union[int, Dict[str, int]]]:
         }
 
 
+def get_all_supported_frameworks() -> List[str]:
+    """
+    지원되는 모든 지침서 이름 반환
+    
+    Returns:
+        List[str]: 지침서 이름 리스트
+    """
+    return list(SUPPORTED_SOURCES.keys())
+
+
+def get_implemented_frameworks() -> List[str]:
+    """
+    실제 구현된 지침서 이름 반환
+    
+    Returns:
+        List[str]: 구현된 지침서 이름 리스트
+    """
+    implemented = []
+    
+    for source in SUPPORTED_SOURCES.keys():
+        try:
+            rules = load_rules(source)
+            if rules:  # 룰이 있는 경우만 구현된 것으로 간주
+                implemented.append(source)
+        except (NotImplementedError, ImportError):
+            continue
+    
+    return implemented
+
+
+def validate_framework_availability(source: str) -> Dict[str, bool]:
+    """
+    지침서 사용 가능성 검증
+    
+    Args:
+        source: 지침서 이름
+        
+    Returns:
+        Dict[str, bool]: 검증 결과
+    """
+    source = source.upper()
+    
+    result = {
+        'is_supported': source in SUPPORTED_SOURCES,
+        'is_implemented': False,
+        'has_rules': False,
+        'rule_count': 0
+    }
+    
+    if result['is_supported']:
+        try:
+            rules = load_rules(source)
+            result['is_implemented'] = True
+            result['has_rules'] = len(rules) > 0
+            result['rule_count'] = len(rules)
+        except (NotImplementedError, ImportError):
+            pass
+    
+    return result
+
+
 # 기존 호환성을 위한 함수들 (기본적으로 KISA 사용)
 def get_all_rules() -> Dict[str, SecurityRule]:
     """모든 보안 룰 반환 (기본: KISA)"""
@@ -313,3 +384,51 @@ def get_rules_by_category_legacy(category: Union[str, RuleCategory]) -> Dict[str
 def get_rule_by_id_legacy(rule_id: str) -> Optional[SecurityRule]:
     """특정 룰 ID로 룰 반환 (기본: KISA)"""
     return get_rule_by_id("KISA", rule_id)
+
+
+# NW 지침서 전용 함수들
+def get_nw_rules() -> Dict[str, SecurityRule]:
+    """NW 지침서 룰셋 반환"""
+    return load_rules("NW")
+
+
+def get_nw_rules_by_device_type(device_type: str) -> Dict[str, SecurityRule]:
+    """NW 지침서에서 특정 장비 타입 룰 반환"""
+    return get_rules_by_device_type("NW", device_type)
+
+
+def compare_frameworks(*sources: str) -> Dict[str, Dict[str, Union[int, List[str]]]]:
+    """
+    여러 지침서 간 비교 분석
+    
+    Args:
+        *sources: 비교할 지침서 이름들
+        
+    Returns:
+        Dict: 비교 분석 결과
+    """
+    comparison = {}
+    
+    for source in sources:
+        try:
+            rules = load_rules(source)
+            stats = get_statistics(source)
+            
+            comparison[source] = {
+                'total_rules': len(rules),
+                'rule_ids': list(rules.keys()),
+                'severity_distribution': stats['severityStats'],
+                'category_distribution': stats['categoryStats'],
+                'device_support': stats['deviceStats'],
+                'logical_rules': stats['logicalRules'],
+                'pattern_rules': stats['patternRules']
+            }
+        except (ValueError, NotImplementedError, ImportError) as e:
+            comparison[source] = {
+                'error': str(e),
+                'total_rules': 0,
+                'rule_ids': [],
+                'is_available': False
+            }
+    
+    return comparison

@@ -1,4 +1,4 @@
-# 완전한 프로젝트 구조
+# 완전한 프로젝트 구조 (NW 지침서 추가)
 
 kisa-network-analyzer/
 ├── main.py                     # Flask 애플리케이션 메인 파일
@@ -8,30 +8,44 @@ kisa-network-analyzer/
 ├── Makefile                   # 프로젝트 관리 명령어
 ├── Dockerfile                 # Docker 이미지 설정
 ├── docker-compose.yml         # Docker Compose 설정
+├── docker-compose.dev.yml     # 개발용 Docker Compose
 ├── .env.example              # 환경변수 예시
 ├── .gitignore                # Git 무시 파일
+├── .dockerignore             # Docker 무시 파일
 ├── README.md                 # 프로젝트 문서
 ├── LICENSE                   # 라이선스
 ├── CHANGELOG.md              # 변경 이력
 ├── CONTRIBUTING.md           # 기여 가이드
+├── MANIFEST.in               # 패키지 포함 파일
 │
 ├── models/                   # 데이터 모델
 │   ├── __init__.py
 │   ├── analysis_request.py   # 분석 요청 모델
 │   └── analysis_response.py  # 분석 응답 모델
 │
-├── rules/                    # 보안 룰셋
-│   ├── __init__.py
-│   └── security_rules.py     # KISA 가이드 기반 룰셋
+├── rules/                    # 보안 룰셋 (다중 지침서 지원)
+│   ├── __init__.py          # 호환성 유지 및 통합 interface
+│   ├── loader.py            # 다중 지침서 로더 시스템
+│   ├── rules_status.yaml    # 지침서별 룰 상태 관리
+│   │
+│   ├── kisa_rules.py        # KISA 가이드 룰셋 (38개 룰)
+│   ├── checks_kisa.py       # KISA 논리적 검증 함수
+│   │
+│   ├── cis_rules.py         # CIS Controls 룰셋 (11개 룰)
+│   ├── checks_cis.py        # CIS 논리적 검증 함수
+│   │
+│   ├── nw_rules.py          # NW 지침서 룰셋 (42개 룰) ⭐️ 새로 추가
+│   └── checks_nw.py         # NW 논리적 검증 함수 ⭐️ 새로 추가
 │
 ├── analyzers/               # 분석 엔진
 │   ├── __init__.py
-│   └── config_analyzer.py   # 설정 파일 분석기
+│   └── config_analyzer.py   # 다중 지침서 분석기
 │
 ├── utils/                   # 유틸리티
 │   ├── __init__.py
 │   ├── validation.py        # 요청 검증
-│   └── logger.py           # 로깅 설정
+│   ├── logger.py           # 로깅 설정
+│   └── preset_manager.py   # 사용자 프리셋 관리
 │
 ├── tests/                   # 테스트
 │   ├── __init__.py
@@ -53,20 +67,47 @@ kisa-network-analyzer/
 │   ├── cisco_vulnerable.cfg
 │   ├── cisco_secure.cfg
 │   ├── juniper_vulnerable.conf
-│   └── juniper_secure.conf
+│   ├── juniper_secure.conf
+│   ├── nw_vulnerable.cfg   # ⭐️ NW 지침서용 예제
+│   └── nw_secure.cfg       # ⭐️ NW 지침서용 예제
 │
 ├── logs/                   # 로그 파일 (생성됨)
 │   └── .gitkeep
 │
 └── docs/                   # 문서 (향후 확장)
-    └── api.md
+    ├── api.md              # API 명세서 ⭐️ 새로 추가
+    └── frameworks.md       # 지침서별 상세 문서
 
 # ================================
-# 빠른 시작 가이드
+# 지원되는 보안 지침서 현황
 
-## 1. 설치
+## 구현 완료된 지침서
 
-### 자동 설치
+### 1. KISA (한국인터넷진흥원) ✅ 완전 구현
+- 총 38개 룰
+- 모든 룰에 논리적 검증 함수 적용
+- 장비 타입: Cisco, Juniper, Radware, Passport, Piolink
+
+### 2. CIS (Center for Internet Security) ✅ 부분 구현
+- 총 11개 룰 (AAA 관련)
+- Cisco IOS 12 Benchmark v4.0.0 기준
+- 장비 타입: Cisco
+
+### 3. NW (네트워크 보안 지침서) ✅ 완전 구현 ⭐️ 새로 추가
+- 총 42개 룰
+- 확장된 장비 지원 (HP, Dasan, Alcatel, Netgear 등)
+- 물리적 보안 및 무선랜 보안 강화
+
+## 계획된 지침서
+
+### 4. NIST (National Institute of Standards) 🚧 계획 중
+- NIST Cybersecurity Framework 2.0 기준
+- 예상 룰 수: 50+ 개
+
+# ================================
+# 빠른 시작 가이드 (업데이트)
+
+## 1. 설치 (변경 없음)
 ```bash
 git clone https://github.com/your-org/kisa-network-analyzer.git
 cd kisa-network-analyzer
@@ -74,172 +115,123 @@ chmod +x scripts/install.sh
 ./scripts/install.sh
 ```
 
-### 수동 설치
-```bash
-# 1. 저장소 복제
-git clone https://github.com/your-org/kisa-network-analyzer.git
-cd kisa-network-analyzer
+## 2. 새로운 NW 지침서 사용
 
-# 2. 가상환경 생성
-python3 -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-
-# 3. 의존성 설치
-pip install -r requirements.txt
-
-# 4. 환경설정
-cp .env.example .env
-mkdir -p logs
-```
-
-## 2. 실행
-
-### 개발 서버
-```bash
-# 가상환경 활성화
-source venv/bin/activate
-
-# 서버 시작
-python main.py
-
-# 또는 Make 사용
-make run
-```
-
-### 프로덕션 서버
-```bash
-# Gunicorn 사용
-gunicorn --bind 0.0.0.0:5000 --workers 4 main:app
-
-# 또는 Make 사용
-make run-prod
-```
-
-### Docker 사용
-```bash
-# 이미지 빌드 및 실행
-make docker-build
-make docker-run
-
-# 또는 Docker Compose
-docker-compose up -d
-```
-
-## 3. API 사용
-
-### 헬스 체크
-```bash
-curl http://localhost:5000/api/v1/health
-```
-
-### 설정 분석
+### NW 지침서로 분석
 ```bash
 curl -X POST http://localhost:5000/api/v1/config-analyze \
   -H "Content-Type: application/json" \
   -d '{
     "deviceType": "Cisco",
+    "framework": "NW",
     "configText": "enable password cisco123\nsnmp-server community public RO",
     "options": {"checkAllRules": true}
   }'
 ```
 
-### 예제 설정 파일 분석
+### NW 지침서 룰 목록 조회
 ```bash
-# 취약한 설정 분석
-python test_api.py --test analyze
-
-# 또는 직접 파일 사용
-curl -X POST http://localhost:5000/api/v1/config-analyze \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"deviceType\": \"Cisco\",
-    \"configText\": \"$(cat examples/cisco_vulnerable.cfg)\",
-    \"options\": {\"checkAllRules\": true}
-  }"
+curl http://localhost:5000/api/v1/frameworks/NW/rules
 ```
 
-## 4. 테스트
-
+### NW 지침서 정보 조회
 ```bash
-# 전체 테스트
-make test
-
-# API 테스트
-make api-test
-
-# 성능 벤치마크
-make benchmark
-
-# 룰셋 검증
-make validate-rules
+curl http://localhost:5000/api/v1/frameworks
 ```
 
-# ================================
-# 실행 확인 방법
+## 3. 지원되는 모든 지침서 현황
 
-## 1. 서버 시작 확인
-서버를 시작한 후 다음과 같은 출력이 나와야 합니다:
+### 지침서별 룰 수
+- **KISA**: 38개 룰 (완전 구현)
+- **CIS**: 11개 룰 (부분 구현)
+- **NW**: 42개 룰 (완전 구현) ⭐️ 새로 추가
+- **NIST**: 0개 룰 (계획 중)
 
+### 장비 지원 현황
 ```
- * Running on all addresses (0.0.0.0)
- * Running on http://127.0.0.1:5000
- * Running on http://[::1]:5000
-Press CTRL+C to quit
- * Restarting with stat
- * Debugger is active!
- * Debugger PIN: xxx-xxx-xxx
-```
-
-## 2. 헬스 체크 확인
-```bash
-curl http://localhost:5000/api/v1/health
+Cisco     : KISA(38) + CIS(11) + NW(42) = 91개 룰
+Juniper   : KISA(38) + NW(35) = 73개 룰
+HP        : NW(30) = 30개 룰 ⭐️ 새로 추가
+Piolink   : KISA(38) + NW(35) = 73개 룰
+Radware   : KISA(25) + NW(20) = 45개 룰
+Dasan     : NW(25) = 25개 룰 ⭐️ 새로 추가
+Alcatel   : NW(28) = 28개 룰 ⭐️ 새로 추가
 ```
 
-예상 응답:
-```json
-{
-  "status": "healthy",
-  "version": "1.0.0",
-  "timestamp": "2024-01-15T10:30:00.123456",
-  "service": "KISA Network Security Config Analyzer"
-}
-```
+## 4. 새로운 API 기능
 
-## 3. 룰 목록 확인
-```bash
-curl http://localhost:5000/api/v1/rules
-```
-
-예상 응답:
-```json
-{
-  "success": true,
-  "totalRules": 15,
-  "rules": [
-    {
-      "ruleId": "N-01",
-      "title": "기본 패스워드 변경",
-      "description": "기본 패스워드를 변경하지 않고 사용하는지 점검",
-      "severity": "상",
-      "category": "계정 관리",
-      "deviceTypes": ["Cisco", "Alteon", "Passport", "Juniper", "Piolink"],
-      "reference": "KISA 가이드 N-01 (상) 1.1 패스워드 설정"
-    }
-  ]
-}
-```
-
-## 4. 실제 분석 테스트
+### 다중 지침서 비교 분석
 ```bash
 curl -X POST http://localhost:5000/api/v1/config-analyze \
   -H "Content-Type: application/json" \
   -d '{
     "deviceType": "Cisco",
-    "configText": "version 15.1\nhostname TestRouter\nenable password cisco123\nsnmp-server community public RO\nline vty 0 4\n password simple\n transport input telnet",
+    "framework": "KISA",
+    "configText": "...",
     "options": {
-      "checkAllRules": true,
-      "includeRecommendations": true
+      "compareWith": ["NW", "CIS"],
+      "analysisMode": "comparison"
     }
+  }'
+```
+
+### 프리셋을 이용한 분석
+```bash
+curl -X POST http://localhost:5000/api/v1/analyze-with-preset \
+  -H "Content-Type: application/json" \
+  -d '{
+    "presetId": "nw_comprehensive",
+    "deviceType": "Cisco",
+    "configText": "..."
+  }'
+```
+
+# ================================
+# NW 지침서 특징
+
+## 확장된 보안 영역
+1. **물리적 보안 강화**
+   - 무선랜 통제대책 (NW-42)
+   - 스위치/허브 보안 강화 (NW-38)
+   - 불필요한 포트 차단 강화
+
+2. **네트워크 장비 관리 강화**
+   - 백업 관리 (NW-41)
+   - 동적 라우팅 프로토콜 인증 (NW-40)
+   - 환경설정 원격 로딩 차단 (NW-39)
+
+3. **확장된 장비 지원**
+   - HP, Dasan, Alcatel, Netgear 등
+   - 무선 장비 전용 룰
+   - 스위치 전용 보안 룰
+
+## NW vs KISA vs CIS 비교
+
+| 영역 | KISA | CIS | NW |
+|------|------|-----|-----|
+| 기본 보안 | ✅ | ✅ | ✅ |
+| AAA 인증 | ⚠️ 기본 | ✅ 상세 | ✅ 강화 |
+| 물리적 보안 | ⚠️ 기본 | ❌ | ✅ 강화 |
+| 무선랜 보안 | ❌ | ❌ | ✅ 전용 |
+| 백업 관리 | ❌ | ❌ | ✅ 전용 |
+| 장비 지원 | 5개 | 1개 | 9개 |
+
+# ================================
+# 실행 확인 방법 (업데이트)
+
+## 1. NW 지침서 동작 확인
+```bash
+# NW 지침서 정보 확인
+curl http://localhost:5000/api/v1/frameworks/NW/rules
+
+# NW 지침서로 분석
+curl -X POST http://localhost:5000/api/v1/config-analyze \
+  -H "Content-Type: application/json" \
+  -d '{
+    "deviceType": "HP",
+    "framework": "NW",
+    "configText": "username admin password admin123\nsnmp-server community public RW",
+    "options": {"checkAllRules": true}
   }'
 ```
 
@@ -247,221 +239,93 @@ curl -X POST http://localhost:5000/api/v1/config-analyze \
 ```json
 {
   "success": true,
-  "deviceType": "Cisco",
-  "totalLines": 6,
+  "framework": "NW",
+  "deviceType": "HP",
   "issuesFound": 3,
-  "analysisTime": 0.15,
   "results": [
     {
-      "ruleId": "N-01",
+      "ruleId": "NW-01",
       "severity": "상",
-      "line": 3,
-      "matchedText": "enable password cisco123",
-      "description": "기본 패스워드를 변경하지 않고 사용",
-      "recommendation": "enable secret 명령어로 암호화된 패스워드 설정 필요",
-      "reference": "KISA 가이드 N-01 (상) 1.1 패스워드 설정",
-      "category": "계정 관리"
+      "description": "기본 패스워드 사용",
+      "recommendation": "기본 패스워드를 강력한 패스워드로 변경"
     },
     {
-      "ruleId": "N-08",
-      "severity": "상", 
-      "line": 4,
-      "matchedText": "snmp-server community public RO",
-      "description": "SNMP 기본 또는 단순한 Community String 사용",
-      "recommendation": "Public, Private 외 유추하기 어려운 복잡한 Community String 설정",
-      "reference": "KISA 가이드 N-08 (상) 5.2 SNMP community string 복잡성 설정",
-      "category": "기능 관리"
-    },
-    {
-      "ruleId": "N-16",
+      "ruleId": "NW-17",
       "severity": "중",
-      "line": 7,
-      "matchedText": "transport input telnet",
-      "description": "VTY 접속 시 암호화되지 않은 프로토콜 사용",
-      "recommendation": "VTY 라인에서 SSH만 허용하도록 설정",
-      "reference": "KISA 가이드 N-16 (중) 2.3 VTY 접속 시 안전한 프로토콜 사용",
-      "category": "접근 관리"
+      "description": "SNMP 기본 커뮤니티 스트링 사용",
+      "recommendation": "복잡한 커뮤니티 스트링 설정"
+    },
+    {
+      "ruleId": "NW-19",
+      "severity": "중",
+      "description": "SNMP RW 권한 사용",
+      "recommendation": "RO 권한으로 변경"
     }
-  ],
-  "statistics": {
-    "totalRulesChecked": 25,
-    "rulesPassed": 22,
-    "rulesFailed": 3,
-    "highSeverityIssues": 2,
-    "mediumSeverityIssues": 1,
-    "lowSeverityIssues": 0
-  }
+  ]
+}
+```
+
+## 2. 다중 지침서 지원 확인
+```bash
+curl http://localhost:5000/api/v1/frameworks
+```
+
+예상 응답:
+```json
+{
+  "success": true,
+  "totalFrameworks": 4,
+  "implementedFrameworks": 3,
+  "frameworks": [
+    {
+      "id": "KISA",
+      "name": "KISA 네트워크 장비 보안 가이드",
+      "total_rules": 38,
+      "isImplemented": true
+    },
+    {
+      "id": "CIS",
+      "name": "CIS Controls",
+      "total_rules": 11,
+      "isImplemented": true
+    },
+    {
+      "id": "NW",
+      "name": "NW 네트워크 보안 지침서",
+      "total_rules": 42,
+      "isImplemented": true
+    },
+    {
+      "id": "NIST",
+      "name": "NIST Cybersecurity Framework",
+      "total_rules": 0,
+      "isImplemented": false
+    }
+  ]
 }
 ```
 
 # ================================
-# 문제 해결
+# 업데이트 내용 요약
 
-## 일반적인 문제들
+## 새로 추가된 파일
+- `rules/nw_rules.py`: NW 지침서 룰셋 정의 (42개 룰)
+- `rules/checks_nw.py`: NW 논리적 검증 함수
+- `rules/rules_status.yaml`: 지침서별 룰 상태 관리
+- `docs/api.md`: API 명세서
+- `examples/nw_vulnerable.cfg`: NW 지침서용 취약한 설정 예제
+- `examples/nw_secure.cfg`: NW 지침서용 안전한 설정 예제
 
-### 1. 포트 충돌 오류
-```
-OSError: [Errno 48] Address already in use
-```
+## 기능 향상
+- 총 3개 지침서 지원 (KISA, CIS, NW)
+- 총 91개 룰 지원 (KISA: 38 + CIS: 11 + NW: 42)
+- 9개 장비 타입 지원 (기존 5개 + 새로 추가 4개)
+- 물리적 보안 및 무선랜 보안 강화
+- 확장된 네트워크 장비 관리 기능
 
-**해결방법:**
-```bash
-# 포트 사용 중인 프로세스 확인
-lsof -i :5000
+## 호환성
+- 기존 API 완전 호환 유지
+- KISA 지침서 기본값 유지
+- 점진적 마이그레이션 지원
 
-# 프로세스 종료
-kill -9 <PID>
-
-# 또는 다른 포트 사용
-export API_PORT=5001
-python main.py
-```
-
-### 2. 의존성 설치 오류
-```bash
-# pip 업그레이드
-pip install --upgrade pip
-
-# 캐시 클리어 후 재설치
-pip cache purge
-pip install -r requirements.txt
-```
-
-### 3. 권한 오류 (Docker)
-```bash
-# Docker 권한 확인
-sudo usermod -aG docker $USER
-newgrp docker
-```
-
-### 4. 메모리 부족
-큰 설정 파일 분석 시 메모리 부족이 발생할 수 있습니다:
-
-```bash
-# 환경변수로 제한 설정
-export MAX_CONFIG_SIZE=5242880  # 5MB
-export ANALYSIS_TIMEOUT=60      # 60초
-```
-
-## 로그 확인
-
-### 애플리케이션 로그
-```bash
-tail -f logs/app.log
-```
-
-### 분석 상세 로그
-```bash
-# 디버그 모드로 실행
-export LOG_LEVEL=DEBUG
-python main.py
-```
-
-## 성능 모니터링
-
-### 메모리 사용량 확인
-```bash
-# 프로세스 모니터링
-ps aux | grep python
-
-# 시스템 리소스 모니터링
-htop
-```
-
-### API 응답시간 측정
-```bash
-# curl로 시간 측정
-curl -w "@curl-format.txt" -X POST http://localhost:5000/api/v1/config-analyze \
-  -H "Content-Type: application/json" \
-  -d @test_request.json
-
-# curl-format.txt 내용:
-#      time_namelookup:  %{time_namelookup}\n
-#         time_connect:  %{time_connect}\n
-#      time_appconnect:  %{time_appconnect}\n
-#     time_pretransfer:  %{time_pretransfer}\n
-#        time_redirect:  %{time_redirect}\n
-#   time_starttransfer:  %{time_starttransfer}\n
-#                     ----------\n
-#           time_total:  %{time_total}\n
-```
-
-# ================================
-# 고급 사용법
-
-## 1. 배치 분석
-여러 설정 파일을 순차적으로 분석:
-
-```python
-import requests
-import os
-
-def batch_analyze(config_dir, device_type):
-    results = {}
-    for filename in os.listdir(config_dir):
-        if filename.endswith('.cfg'):
-            with open(os.path.join(config_dir, filename), 'r') as f:
-                config_text = f.read()
-            
-            response = requests.post('http://localhost:5000/api/v1/config-analyze', 
-                json={
-                    'deviceType': device_type,
-                    'configText': config_text,
-                    'options': {'checkAllRules': True}
-                })
-            
-            if response.status_code == 200:
-                results[filename] = response.json()
-                print(f"{filename}: {results[filename]['issuesFound']} 취약점 발견")
-    
-    return results
-
-# 사용 예시
-results = batch_analyze('/path/to/configs/', 'Cisco')
-```
-
-## 2. 특정 룰만 검사
-보안 등급별로 선별적 분석:
-
-```python
-# 상급 보안 룰만 검사
-high_severity_rules = ['N-01', 'N-02', 'N-03', 'N-04', 'N-05', 'N-07', 'N-08', 'N-11']
-
-response = requests.post('http://localhost:5000/api/v1/config-analyze', 
-    json={
-        'deviceType': 'Cisco',
-        'configText': config_text,
-        'options': {
-            'checkAllRules': False,
-            'specificRuleIds': high_severity_rules
-        }
-    })
-```
-
-## 3. 결과 필터링 및 리포트 생성
-```python
-def generate_security_report(analysis_result):
-    high_issues = [r for r in analysis_result['results'] if r['severity'] == '상']
-    medium_issues = [r for r in analysis_result['results'] if r['severity'] == '중']
-    
-    report = f"""
-보안 분석 리포트
-=================
-장비 타입: {analysis_result['deviceType']}
-분석 라인 수: {analysis_result['totalLines']}
-총 취약점: {analysis_result['issuesFound']}개
-
-상급 취약점: {len(high_issues)}개
-중급 취약점: {len(medium_issues)}개
-
-상급 취약점 상세:
-"""
-    
-    for issue in high_issues:
-        report += f"- [{issue['ruleId']}] 라인 {issue['line']}: {issue['description']}\n"
-        report += f"  권고: {issue['recommendation']}\n\n"
-    
-    return report
-```
-
-프로젝트가 완전히 준비되었습니다! 이제 실제로 사용할 수 있는 완전한 KISA 네트워크 장비 취약점 분석 API입니다.
+프로젝트가 NW 지침서 추가로 더욱 강화되었습니다! 🚀
