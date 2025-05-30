@@ -1,4 +1,19 @@
-<!DOCTYPE html>
+<div class="form-group">
+                    <label for="framework">프레임워크:</label>
+                    <select id="framework">
+                        <option value="NW">NW 네트워크 가이드</option>
+                        <option value="KISA">KISA 가이드</option>
+                        <option value="BOTH">둘 다 실행</option>
+                    </select>
+                </div>                <div class="form-group">
+                    <label for="debugLevel">디버그 레벨:</label>
+                    <select id="debugLevel">
+                        <option value="1">레벨 1: 기본 함수 호출</option>
+                        <option value="2">레벨 2: Context 분석</option>
+                        <option value="3">레벨 3: 인터페이스 상세</option>
+                        <option value="4">레벨 4: 전체 디버그</option>
+                    </select>
+                </div><!DOCTYPE html>
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
@@ -237,7 +252,7 @@
                 <h2><span class="emoji">⚙️</span> API 서버 설정</h2>
                 <div class="form-group">
                     <label for="apiUrl">API 서버 URL:</label>
-                    <input type="text" id="apiUrl" placeholder="https://kisa-network-analyzer-production.up.railway.app/api/v1/config-analyze" value="">
+                    <input type="text" id="apiUrl" placeholder="https://your-api-server.com/api/analyze" value="">
                 </div>
                 <div class="form-group">
                     <label for="apiKey">API 키 (선택사항):</label>
@@ -277,6 +292,20 @@
                 </div>
             </div>
             
+            <!-- 요청 데이터 미리보기 섹션 -->
+            <div class="section">
+                <h2><span class="emoji">👀</span> 요청 데이터 미리보기</h2>
+                <p style="margin-bottom: 15px; color: #666;">API로 전송될 요청 데이터 형식:</p>
+                <div id="requestPreview" style="background: #f8f9fa; padding: 15px; border-radius: 8px; font-family: 'Consolas', monospace; font-size: 12px; border-left: 4px solid #17a2b8;">
+                    {
+                      "configText": "설정 텍스트...",
+                      "deviceType": "Cisco",
+                      "rules": ["NW-23"]
+                    }
+                </div>
+                <button onclick="updateRequestPreview()" style="margin-top: 10px; padding: 8px 16px; font-size: 14px;">🔄 미리보기 업데이트</button>
+            </div>
+            
             <!-- 커스텀 테스트 섹션 -->
             <div class="section">
                 <h2><span class="emoji">🛠️</span> 커스텀 테스트</h2>
@@ -297,13 +326,22 @@
                 </div>
                 
                 <div class="form-group">
-                    <label for="debugLevel">디버그 레벨:</label>
-                    <select id="debugLevel">
-                        <option value="1">레벨 1: 기본 함수 호출</option>
-                        <option value="2">레벨 2: Context 분석</option>
-                        <option value="3">레벨 3: 인터페이스 상세</option>
-                        <option value="4">레벨 4: 전체 디버그</option>
+                    <label for="deviceType">장비 타입:</label>
+                    <select id="deviceType">
+                        <option value="Cisco">Cisco</option>
+                        <option value="Juniper">Juniper</option>
+                        <option value="HP">HP</option>
+                        <option value="Alcatel">Alcatel</option>
+                        <option value="Radware">Radware</option>
+                        <option value="Piolink">Piolink</option>
+                        <option value="Extreme">Extreme</option>
+                        <option value="Dasan">Dasan</option>
                     </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="testRules">테스트할 룰 (선택사항):</label>
+                    <input type="text" id="testRules" placeholder="NW-23 또는 NW-01,NW-02,NW-23" value="NW-23">
                 </div>
                 
                 <button onclick="runCustomTest()">🔍 커스텀 테스트 실행</button>
@@ -459,11 +497,37 @@ interfaces {
         // 페이지 로드 시 초기화
         window.onload = function() {
             // 기본 API URL 설정 (필요에 따라 수정)
-            document.getElementById('apiUrl').value = 'https://kisa-network-analyzer-production.up.railway.app/api/v1/config-analyze';
+            document.getElementById('apiUrl').value = 'http://localhost:8000/api/analyze';
             
             // 기본 설정 템플릿 로드
             updateConfigTemplate();
+            
+            // 요청 데이터 미리보기 추가
+            updateRequestPreview();
         };
+        
+        // 요청 데이터 미리보기 업데이트
+        function updateRequestPreview() {
+            const configText = document.getElementById('configText').value.trim();
+            const deviceType = document.getElementById('deviceType').value;
+            const testRules = document.getElementById('testRules').value.trim();
+            
+            let rules = ["NW-23"];
+            if (testRules) {
+                rules = testRules.split(',').map(r => r.trim()).filter(r => r);
+            }
+            
+            const sampleRequest = {
+                configText: configText.substring(0, 100) + "...",
+                deviceType: deviceType,
+                rules: rules
+            };
+            
+            const previewDiv = document.getElementById('requestPreview');
+            if (previewDiv) {
+                previewDiv.textContent = JSON.stringify(sampleRequest, null, 2);
+            }
+        }
         
         // 설정 템플릿 업데이트
         function updateConfigTemplate() {
@@ -482,7 +546,10 @@ interfaces {
             updateResponse(`🚀 ${step.title} 시작...\n\n${step.description}\n\n테스트 진행 중...`, 'warning');
             
             const requestData = {
-                config: step.config,
+                configText: step.config,  // config → configText로 변경
+                deviceType: "Cisco",      // 필수 필드 추가
+                framework: "NW",          // NW 프레임워크 명시
+                rules: ["NW-23"],         // 특정 룰만 실행
                 debug_level: step.debugLevel,
                 target_rule: "NW-23",
                 step: stepKey
@@ -495,22 +562,34 @@ interfaces {
         function runCustomTest() {
             const configText = document.getElementById('configText').value.trim();
             const debugLevel = parseInt(document.getElementById('debugLevel').value);
+            const deviceType = document.getElementById('deviceType').value;
+            const framework = document.getElementById('framework').value;
+            const testRules = document.getElementById('testRules').value.trim();
             
             if (!configText) {
                 updateResponse('❌ 오류: 네트워크 설정을 입력해주세요.', 'error');
                 return;
             }
             
-            updateResponse('🛠️ 커스텀 테스트 시작...\n\n설정 분석 중...', 'warning');
+            updateResponse(`🛠️ 커스텀 테스트 시작 (${framework} 프레임워크)...\n\n설정 분석 중...`, 'warning');
+            
+            // 룰 목록 처리
+            let rules = ["NW-23"];  // 기본값
+            if (testRules) {
+                rules = testRules.split(',').map(r => r.trim()).filter(r => r);
+            }
             
             const requestData = {
-                config: configText,
+                configText: configText,
+                deviceType: deviceType,
+                framework: framework,
+                rules: rules,
                 debug_level: debugLevel,
                 target_rule: "NW-23",
                 step: "custom"
             };
             
-            makeApiRequest(requestData, "커스텀 테스트");
+            makeApiRequest(requestData, `커스텀 테스트 (${framework})`);
         }
         
         // API 요청 실행
