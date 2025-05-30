@@ -68,7 +68,7 @@ python test_api.py
 ### 서버 실행
 ```bash
 python main.py
-# 서버: http://localhost:5000
+# 서버: https://kisa-network-analyzer-production.up.railway.app
 ```
 
 ## 📡 API 사용법
@@ -221,7 +221,7 @@ python -c "from analyzers.config_analyzer import EnhancedConfigAnalyzer; print('
 import requests
 
 # KISA 지침서로 분석
-response = requests.post('http://localhost:5000/api/v1/config-analyze', json={
+response = requests.post('https://kisa-network-analyzer-production.up.railway.app/api/v1/config-analyze', json={
     "deviceType": "Cisco",
     "framework": "KISA",
     "configText": config_text,
@@ -237,10 +237,10 @@ print(f"취약점: {result['issuesFound']}개")
 ### 지침서 통계 조회
 ```python
 # 지원 지침서 목록
-frameworks = requests.get('http://localhost:5000/api/v1/frameworks').json()
+frameworks = requests.get('https://kisa-network-analyzer-production.up.railway.app/api/v1/frameworks').json()
 
 # KISA 통계
-stats = requests.get('http://localhost:5000/api/v1/statistics?framework=KISA').json()
+stats = requests.get('https://kisa-network-analyzer-production.up.railway.app/api/v1/statistics?framework=KISA').json()
 ```
 
 ## 📊 성능 및 확장성
