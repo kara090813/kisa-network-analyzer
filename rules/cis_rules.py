@@ -12,52 +12,11 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Pattern, Callable, Optional, Any, Tuple
 from enum import Enum
 
-class RuleCategory(Enum):
-    """룰 카테고리"""
-    ACCOUNT_MANAGEMENT = "계정 관리"
-    ACCESS_MANAGEMENT = "접근 관리"
-    PATCH_MANAGEMENT = "패치 관리"
-    LOG_MANAGEMENT = "로그 관리"
-    FUNCTION_MANAGEMENT = "기능 관리"
-
-
-@dataclass
-class CISConfigContext:
-    """CIS 전용 설정 파일 분석 컨텍스트"""
-    full_config: str
-    config_lines: List[str]
-    device_type: str
-    parsed_interfaces: Dict[str, Dict[str, Any]] = field(default_factory=dict)
-    parsed_users: List[Dict[str, Any]] = field(default_factory=list)
-    parsed_services: Dict[str, bool] = field(default_factory=dict)
-    global_settings: Dict[str, Any] = field(default_factory=dict)
-    vty_lines: List[Dict[str, Any]] = field(default_factory=list)
-    snmp_communities: List[Dict[str, Any]] = field(default_factory=list)
-    access_lists: Dict[str, List[str]] = field(default_factory=dict)
-
-
-@dataclass
-class SecurityRule:
-    """CIS 보안 룰 정의"""
-    rule_id: str
-    title: str
-    description: str
-    severity: str  # 상/중/하
-    category: RuleCategory
-    patterns: List[str]
-    negative_patterns: List[str]
-    device_types: List[str]
-    recommendation: str
-    reference: str
-    logical_check_function: Optional[Callable[[str, int, CISConfigContext], List[Dict[str, Any]]]] = None
-    
-    def __post_init__(self):
-        """패턴들을 컴파일된 정규식으로 변환"""
-        self.compiled_patterns = [re.compile(pattern, re.IGNORECASE | re.MULTILINE | re.DOTALL) 
-                                 for pattern in self.patterns]
-        self.compiled_negative_patterns = [re.compile(pattern, re.IGNORECASE | re.MULTILINE | re.DOTALL) 
-                                         for pattern in self.negative_patterns]
-
+# KISA 룰셋에서 공통 클래스들 import
+from .kisa_rules import (
+    RuleCategory, ConfigContext, LogicalCondition, SecurityRule,
+    parse_config_context
+)
 
 
 # ==================== CIS 룰셋 정의 ====================

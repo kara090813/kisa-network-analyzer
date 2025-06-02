@@ -7,12 +7,12 @@ CIS Cisco IOS 12 Benchmark v4.0.0 네트워크 장비 보안 점검 룰의 논�
 """
 
 from typing import List, Dict, Any
-from .cis_rules import CISConfigContext
+from .kisa_rules import ConfigContext
 
 
 # ======================= 1.1 Local Authentication, Authorization and Accounting (AAA) Rules =======================
 
-def check_cis_1_1_1(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_1_1_1(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-1.1.1: Enable 'aaa new-model' - AAA 시스템 활성화 확인"""
     vulnerabilities = []
     
@@ -34,7 +34,7 @@ def check_cis_1_1_1(line: str, line_num: int, context: CISConfigContext) -> List
     return vulnerabilities
 
 
-def check_cis_1_1_2(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_1_1_2(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-1.1.2: Enable 'aaa authentication login' - 로그인 AAA 인증 확인"""
     vulnerabilities = []
     
@@ -56,7 +56,7 @@ def check_cis_1_1_2(line: str, line_num: int, context: CISConfigContext) -> List
     return vulnerabilities
 
 
-def check_cis_1_1_3(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_1_1_3(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-1.1.3: Enable 'aaa authentication enable default' - Enable 모드 AAA 인증 확인"""
     vulnerabilities = []
     
@@ -78,7 +78,7 @@ def check_cis_1_1_3(line: str, line_num: int, context: CISConfigContext) -> List
     return vulnerabilities
 
 
-def check_cis_1_1_4(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_1_1_4(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-1.1.4: Set 'login authentication for 'line con 0' - 콘솔 라인 인증 확인"""
     vulnerabilities = []
     
@@ -118,7 +118,7 @@ def check_cis_1_1_4(line: str, line_num: int, context: CISConfigContext) -> List
     return vulnerabilities
 
 
-def check_cis_1_1_5(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_1_1_5(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-1.1.5: Set 'login authentication for 'line tty' - TTY 라인 인증 확인"""
     vulnerabilities = []
     
@@ -157,7 +157,7 @@ def check_cis_1_1_5(line: str, line_num: int, context: CISConfigContext) -> List
     return vulnerabilities
 
 
-def check_cis_1_1_6(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_1_1_6(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-1.1.6: Set 'login authentication for 'line vty' - VTY 라인 인증 확인"""
     vulnerabilities = []
     
@@ -181,7 +181,7 @@ def check_cis_1_1_6(line: str, line_num: int, context: CISConfigContext) -> List
     return vulnerabilities
 
 
-def check_cis_1_1_7(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_1_1_7(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-1.1.7: Set 'aaa accounting commands 15' - 권한 명령어 추적 확인"""
     vulnerabilities = []
     
@@ -204,7 +204,7 @@ def check_cis_1_1_7(line: str, line_num: int, context: CISConfigContext) -> List
     return vulnerabilities
 
 
-def check_cis_1_1_8(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_1_1_8(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-1.1.8: Set 'aaa accounting connection' - 연결 추적 확인"""
     vulnerabilities = []
     
@@ -227,7 +227,7 @@ def check_cis_1_1_8(line: str, line_num: int, context: CISConfigContext) -> List
     return vulnerabilities
 
 
-def check_cis_1_1_9(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_1_1_9(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-1.1.9: Set 'aaa accounting exec' - EXEC 세션 추적 확인"""
     vulnerabilities = []
     
@@ -250,7 +250,7 @@ def check_cis_1_1_9(line: str, line_num: int, context: CISConfigContext) -> List
     return vulnerabilities
 
 
-def check_cis_1_1_10(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_1_1_10(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-1.1.10: Set 'aaa accounting network' - 네트워크 서비스 추적 확인"""
     vulnerabilities = []
     
@@ -273,7 +273,7 @@ def check_cis_1_1_10(line: str, line_num: int, context: CISConfigContext) -> Lis
     return vulnerabilities
 
 
-def check_cis_1_1_11(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_1_1_11(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-1.1.11: Set 'aaa accounting system' - 시스템 이벤트 추적 확인"""
     vulnerabilities = []
     
@@ -295,7 +295,7 @@ def check_cis_1_1_11(line: str, line_num: int, context: CISConfigContext) -> Lis
     
     return vulnerabilities
 
-def check_cis_1_2_1(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_1_2_1(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-1.2.1: Set 'privilege 1' for local users"""
     vulnerabilities = []
     
@@ -315,7 +315,7 @@ def check_cis_1_2_1(line: str, line_num: int, context: CISConfigContext) -> List
     return vulnerabilities
 
 
-def check_cis_1_2_4(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_1_2_4(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-1.2.4: Create 'access-list' for use with 'line vty'"""
     vulnerabilities = []
     
@@ -346,7 +346,7 @@ def check_cis_1_2_4(line: str, line_num: int, context: CISConfigContext) -> List
     return vulnerabilities
 
 
-def check_cis_1_2_5(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_1_2_5(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-1.2.5: Set 'access-class' for 'line vty'"""
     vulnerabilities = []
     
@@ -364,7 +364,7 @@ def check_cis_1_2_5(line: str, line_num: int, context: CISConfigContext) -> List
     return vulnerabilities
 
 
-def check_cis_1_3_1(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_1_3_1(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-1.3.1: Set the 'banner-text' for 'banner exec'"""
     vulnerabilities = []
     
@@ -382,7 +382,7 @@ def check_cis_1_3_1(line: str, line_num: int, context: CISConfigContext) -> List
     return vulnerabilities
 
 
-def check_cis_1_3_2(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_1_3_2(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-1.3.2: Set the 'banner-text' for 'banner login'"""
     vulnerabilities = []
     
@@ -400,7 +400,7 @@ def check_cis_1_3_2(line: str, line_num: int, context: CISConfigContext) -> List
     return vulnerabilities
 
 
-def check_cis_1_3_3(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_1_3_3(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-1.3.3: Set the 'banner-text' for 'banner motd'"""
     vulnerabilities = []
     
@@ -418,7 +418,7 @@ def check_cis_1_3_3(line: str, line_num: int, context: CISConfigContext) -> List
     return vulnerabilities
 
 
-def check_cis_1_5_1(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_1_5_1(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-1.5.1: Set 'no snmp-server' to disable SNMP when unused"""
     vulnerabilities = []
     
@@ -445,7 +445,7 @@ def check_cis_1_5_1(line: str, line_num: int, context: CISConfigContext) -> List
     return vulnerabilities
 
 
-def check_cis_1_5_6(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_1_5_6(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-1.5.6: Create an 'access-list' for use with SNMP"""
     vulnerabilities = []
     
@@ -464,7 +464,7 @@ def check_cis_1_5_6(line: str, line_num: int, context: CISConfigContext) -> List
     return vulnerabilities
 
 
-def check_cis_1_5_7(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_1_5_7(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-1.5.7: Set 'snmp-server host' when using SNMP"""
     vulnerabilities = []
     
@@ -486,7 +486,7 @@ def check_cis_1_5_7(line: str, line_num: int, context: CISConfigContext) -> List
 
 # ======================= 2.1 Global Service Rules =======================
 
-def check_cis_2_1_1_1_1(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_2_1_1_1_1(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-2.1.1.1.1: Set the 'hostname' - 호스트명 설정 확인"""
     vulnerabilities = []
     
@@ -522,7 +522,7 @@ def check_cis_2_1_1_1_1(line: str, line_num: int, context: CISConfigContext) -> 
     return vulnerabilities
 
 
-def check_cis_2_1_1_1_2(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_2_1_1_1_2(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-2.1.1.1.2: Set the 'ip domain name' - 도메인명 설정 확인"""
     vulnerabilities = []
     
@@ -544,7 +544,7 @@ def check_cis_2_1_1_1_2(line: str, line_num: int, context: CISConfigContext) -> 
     return vulnerabilities
 
 
-def check_cis_2_1_1_1_3(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_2_1_1_1_3(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-2.1.1.1.3: Set 'modulus' to greater than or equal to 2048 - RSA 키 확인"""
     vulnerabilities = []
     
@@ -570,7 +570,7 @@ def check_cis_2_1_1_1_3(line: str, line_num: int, context: CISConfigContext) -> 
     return vulnerabilities
 
 
-def check_cis_2_1_1_1_4(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_2_1_1_1_4(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-2.1.1.1.4: Set 'seconds' for 'ip ssh timeout' - SSH 타임아웃 확인"""
     vulnerabilities = []
     
@@ -592,7 +592,7 @@ def check_cis_2_1_1_1_4(line: str, line_num: int, context: CISConfigContext) -> 
     return vulnerabilities
 
 
-def check_cis_2_1_1_1_5(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_2_1_1_1_5(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-2.1.1.1.5: Set maximum value for 'ip ssh authentication-retries' - SSH 인증 재시도 확인"""
     vulnerabilities = []
     
@@ -614,7 +614,7 @@ def check_cis_2_1_1_1_5(line: str, line_num: int, context: CISConfigContext) -> 
     return vulnerabilities
 
 
-def check_cis_2_1_1_2(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_2_1_1_2(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-2.1.1.2: Set version 2 for 'ip ssh version' - SSH 버전 확인"""
     vulnerabilities = []
     
@@ -636,7 +636,7 @@ def check_cis_2_1_1_2(line: str, line_num: int, context: CISConfigContext) -> Li
     return vulnerabilities
 
 
-def check_cis_2_1_2(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_2_1_2(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-2.1.2: Set 'no cdp run' - CDP 서비스 비활성화 확인"""
     vulnerabilities = []
     
@@ -672,7 +672,7 @@ def check_cis_2_1_2(line: str, line_num: int, context: CISConfigContext) -> List
     return vulnerabilities
 
 
-def check_cis_2_1_3(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_2_1_3(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-2.1.3: Set 'no ip bootp server' - BOOTP 서버 비활성화 확인"""
     vulnerabilities = []
     
@@ -695,7 +695,7 @@ def check_cis_2_1_3(line: str, line_num: int, context: CISConfigContext) -> List
     return vulnerabilities
 
 
-def check_cis_2_1_4(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_2_1_4(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-2.1.4: Set 'no service dhcp' - DHCP 서비스 비활성화 확인"""
     vulnerabilities = []
     
@@ -717,7 +717,7 @@ def check_cis_2_1_4(line: str, line_num: int, context: CISConfigContext) -> List
     return vulnerabilities
 
 
-def check_cis_2_1_5(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_2_1_5(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-2.1.5: Set 'no ip identd' - identd 서버 비활성화 확인"""
     vulnerabilities = []
     
@@ -753,7 +753,7 @@ def check_cis_2_1_5(line: str, line_num: int, context: CISConfigContext) -> List
     return vulnerabilities
 
 
-def check_cis_2_1_6(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_2_1_6(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-2.1.6: Set 'service tcp-keepalives-in' - TCP keepalives-in 확인"""
     vulnerabilities = []
     
@@ -775,7 +775,7 @@ def check_cis_2_1_6(line: str, line_num: int, context: CISConfigContext) -> List
     return vulnerabilities
 
 
-def check_cis_2_1_7(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_2_1_7(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-2.1.7: Set 'service tcp-keepalives-out' - TCP keepalives-out 확인"""
     vulnerabilities = []
     
@@ -797,7 +797,7 @@ def check_cis_2_1_7(line: str, line_num: int, context: CISConfigContext) -> List
     return vulnerabilities
 
 
-def check_cis_2_1_8(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_2_1_8(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-2.1.8: Set 'no service pad' - PAD 서비스 비활성화 확인"""
     vulnerabilities = []
     
@@ -818,7 +818,7 @@ def check_cis_2_1_8(line: str, line_num: int, context: CISConfigContext) -> List
     
     return vulnerabilities
 
-def check_cis_2_2_2(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_2_2_2(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-2.2.2: Set 'buffer size' for 'logging buffered'"""
     vulnerabilities = []
     
@@ -836,7 +836,7 @@ def check_cis_2_2_2(line: str, line_num: int, context: CISConfigContext) -> List
     return vulnerabilities
 
 
-def check_cis_2_2_4(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_2_2_4(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-2.2.4: Set IP address for 'logging host'"""
     vulnerabilities = []
     
@@ -854,7 +854,7 @@ def check_cis_2_2_4(line: str, line_num: int, context: CISConfigContext) -> List
     return vulnerabilities
 
 
-def check_cis_2_2_7(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_2_2_7(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-2.2.7: Set 'logging source interface'"""
     vulnerabilities = []
     
@@ -872,7 +872,7 @@ def check_cis_2_2_7(line: str, line_num: int, context: CISConfigContext) -> List
     return vulnerabilities
 
 
-def check_cis_2_3_1_2(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_2_3_1_2(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-2.3.1.2: Set 'ntp authentication-key'"""
     vulnerabilities = []
     
@@ -892,7 +892,7 @@ def check_cis_2_3_1_2(line: str, line_num: int, context: CISConfigContext) -> Li
     return vulnerabilities
 
 
-def check_cis_2_3_1_3(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_2_3_1_3(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-2.3.1.3: Set the 'ntp trusted-key'"""
     vulnerabilities = []
     
@@ -912,7 +912,7 @@ def check_cis_2_3_1_3(line: str, line_num: int, context: CISConfigContext) -> Li
     return vulnerabilities
 
 
-def check_cis_2_3_2(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_2_3_2(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-2.3.2: Set 'ip address' for 'ntp server'"""
     vulnerabilities = []
     
@@ -930,7 +930,7 @@ def check_cis_2_3_2(line: str, line_num: int, context: CISConfigContext) -> List
     return vulnerabilities
 
 
-def check_cis_2_4_1(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_2_4_1(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-2.4.1: Create a single 'interface loopback'"""
     vulnerabilities = []
     
@@ -960,7 +960,7 @@ def check_cis_2_4_1(line: str, line_num: int, context: CISConfigContext) -> List
     return vulnerabilities
 
 
-def check_cis_2_4_2(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_2_4_2(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-2.4.2: Set AAA 'source-interface'"""
     vulnerabilities = []
     
@@ -981,7 +981,7 @@ def check_cis_2_4_2(line: str, line_num: int, context: CISConfigContext) -> List
     return vulnerabilities
 
 
-def check_cis_3_1_2(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_3_1_2(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-3.1.2: Set 'no ip proxy-arp'"""
     vulnerabilities = []
     
@@ -1005,7 +1005,7 @@ def check_cis_3_1_2(line: str, line_num: int, context: CISConfigContext) -> List
     return vulnerabilities
 
 
-def check_cis_3_1_4(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_3_1_4(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-3.1.4: Set 'ip verify unicast source reachable-via'"""
     vulnerabilities = []
     
@@ -1035,7 +1035,7 @@ def check_cis_3_1_4(line: str, line_num: int, context: CISConfigContext) -> List
     return vulnerabilities
 
 
-def check_cis_3_2_1(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_3_2_1(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-3.2.1: Set 'ip access-list extended' to Forbid Private Source Addresses"""
     vulnerabilities = []
     
@@ -1065,7 +1065,7 @@ def check_cis_3_2_1(line: str, line_num: int, context: CISConfigContext) -> List
     return vulnerabilities
 
 
-def check_cis_3_2_2(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_3_2_2(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-3.2.2: Set inbound 'ip access-group' on the External Interface"""
     vulnerabilities = []
     
@@ -1098,7 +1098,7 @@ def check_cis_3_2_2(line: str, line_num: int, context: CISConfigContext) -> List
 
 # ==================== 라우팅 프로토콜 인증 체크 함수들 ====================
 
-def check_cis_3_3_1_1(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_3_3_1_1(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-3.3.1.1: Set 'key chain' for EIGRP"""
     vulnerabilities = []
     
@@ -1118,7 +1118,7 @@ def check_cis_3_3_1_1(line: str, line_num: int, context: CISConfigContext) -> Li
     return vulnerabilities
 
 
-def check_cis_3_3_1_2(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_3_3_1_2(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-3.3.1.2: Set 'key' for EIGRP key chain"""
     vulnerabilities = []
     
@@ -1139,7 +1139,7 @@ def check_cis_3_3_1_2(line: str, line_num: int, context: CISConfigContext) -> Li
     return vulnerabilities
 
 
-def check_cis_3_3_1_3(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_3_3_1_3(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-3.3.1.3: Set 'key-string' for EIGRP"""
     vulnerabilities = []
     
@@ -1159,7 +1159,7 @@ def check_cis_3_3_1_3(line: str, line_num: int, context: CISConfigContext) -> Li
     return vulnerabilities
 
 
-def check_cis_3_3_1_4(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_3_3_1_4(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-3.3.1.4: Set 'address-family ipv4 autonomous-system' for EIGRP"""
     vulnerabilities = []
     
@@ -1179,7 +1179,7 @@ def check_cis_3_3_1_4(line: str, line_num: int, context: CISConfigContext) -> Li
     return vulnerabilities
 
 
-def check_cis_3_3_1_5(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_3_3_1_5(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-3.3.1.5: Set 'af-interface default' for EIGRP"""
     vulnerabilities = []
     
@@ -1199,7 +1199,7 @@ def check_cis_3_3_1_5(line: str, line_num: int, context: CISConfigContext) -> Li
     return vulnerabilities
 
 
-def check_cis_3_3_1_6(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_3_3_1_6(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-3.3.1.6: Set 'authentication key-chain' for EIGRP"""
     vulnerabilities = []
     
@@ -1219,7 +1219,7 @@ def check_cis_3_3_1_6(line: str, line_num: int, context: CISConfigContext) -> Li
     return vulnerabilities
 
 
-def check_cis_3_3_1_7(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_3_3_1_7(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-3.3.1.7: Set 'authentication mode md5' for EIGRP"""
     vulnerabilities = []
     
@@ -1239,7 +1239,7 @@ def check_cis_3_3_1_7(line: str, line_num: int, context: CISConfigContext) -> Li
     return vulnerabilities
 
 
-def check_cis_3_3_1_8(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_3_3_1_8(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-3.3.1.8: Set 'ip authentication key-chain eigrp'"""
     vulnerabilities = []
     
@@ -1265,7 +1265,7 @@ def check_cis_3_3_1_8(line: str, line_num: int, context: CISConfigContext) -> Li
     return vulnerabilities
 
 
-def check_cis_3_3_1_9(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_3_3_1_9(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-3.3.1.9: Set 'ip authentication mode eigrp'"""
     vulnerabilities = []
     
@@ -1290,7 +1290,7 @@ def check_cis_3_3_1_9(line: str, line_num: int, context: CISConfigContext) -> Li
     return vulnerabilities
 
 
-def check_cis_3_3_2_1(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_3_3_2_1(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-3.3.2.1: Set 'authentication message-digest' for OSPF area"""
     vulnerabilities = []
     
@@ -1310,7 +1310,7 @@ def check_cis_3_3_2_1(line: str, line_num: int, context: CISConfigContext) -> Li
     return vulnerabilities
 
 
-def check_cis_3_3_2_2(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_3_3_2_2(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-3.3.2.2: Set 'ip ospf message-digest-key md5'"""
     vulnerabilities = []
     
@@ -1335,7 +1335,7 @@ def check_cis_3_3_2_2(line: str, line_num: int, context: CISConfigContext) -> Li
     return vulnerabilities
 
 
-def check_cis_3_3_3_1(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_3_3_3_1(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-3.3.3.1: Set 'key chain' for RIPv2"""
     vulnerabilities = []
     
@@ -1355,7 +1355,7 @@ def check_cis_3_3_3_1(line: str, line_num: int, context: CISConfigContext) -> Li
     return vulnerabilities
 
 
-def check_cis_3_3_3_2(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_3_3_3_2(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-3.3.3.2: Set 'key' for RIPv2 key chain"""
     vulnerabilities = []
     
@@ -1377,7 +1377,7 @@ def check_cis_3_3_3_2(line: str, line_num: int, context: CISConfigContext) -> Li
     return vulnerabilities
 
 
-def check_cis_3_3_3_3(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_3_3_3_3(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-3.3.3.3: Set 'key-string' for RIPv2"""
     vulnerabilities = []
     
@@ -1398,7 +1398,7 @@ def check_cis_3_3_3_3(line: str, line_num: int, context: CISConfigContext) -> Li
     return vulnerabilities
 
 
-def check_cis_3_3_3_4(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_3_3_3_4(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-3.3.3.4: Set 'ip rip authentication key-chain'"""
     vulnerabilities = []
     
@@ -1423,7 +1423,7 @@ def check_cis_3_3_3_4(line: str, line_num: int, context: CISConfigContext) -> Li
     return vulnerabilities
 
 
-def check_cis_3_3_3_5(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_3_3_3_5(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-3.3.3.5: Set 'ip rip authentication mode' to 'md5'"""
     vulnerabilities = []
     
@@ -1448,7 +1448,7 @@ def check_cis_3_3_3_5(line: str, line_num: int, context: CISConfigContext) -> Li
     return vulnerabilities
 
 
-def check_cis_3_3_4_1(line: str, line_num: int, context: CISConfigContext) -> List[Dict[str, Any]]:
+def check_cis_3_3_4_1(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-3.3.4.1: Set 'neighbor password' for BGP"""
     vulnerabilities = []
     
