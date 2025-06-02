@@ -547,83 +547,154 @@ def check_nw_21(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
     return vulnerabilities
 
 
-[{
-	"resource": "/c:/kisa-network-analyzer/rules/checks_nw.py",
-	"owner": "pylance",
-	"code": {
-		"value": "reportUndefinedVariable",
-		"target": {
-			"$mid": 1,
-			"path": "/microsoft/pylance-release/blob/main/docs/diagnostics/reportUndefinedVariable.md",
-			"scheme": "https",
-			"authority": "github.com"
-		}
-	},
-	"severity": 4,
-	"message": "\"_is_interface_used_enhanced\" is not defined",
-	"source": "Pylance",
-	"startLineNumber": 584,
-	"startColumn": 23,
-	"endLineNumber": 584,
-	"endColumn": 50
-},{
-	"resource": "/c:/kisa-network-analyzer/rules/checks_nw.py",
-	"owner": "pylance",
-	"code": {
-		"value": "reportUndefinedVariable",
-		"target": {
-			"$mid": 1,
-			"path": "/microsoft/pylance-release/blob/main/docs/diagnostics/reportUndefinedVariable.md",
-			"scheme": "https",
-			"authority": "github.com"
-		}
-	},
-	"severity": 4,
-	"message": "\"_is_critical_interface_enhanced\" is not defined",
-	"source": "Pylance",
-	"startLineNumber": 611,
-	"startColumn": 31,
-	"endLineNumber": 611,
-	"endColumn": 62
-},{
-	"resource": "/c:/kisa-network-analyzer/rules/checks_nw.py",
-	"owner": "pylance",
-	"code": {
-		"value": "reportUndefinedVariable",
-		"target": {
-			"$mid": 1,
-			"path": "/microsoft/pylance-release/blob/main/docs/diagnostics/reportUndefinedVariable.md",
-			"scheme": "https",
-			"authority": "github.com"
-		}
-	},
-	"severity": 4,
-	"message": "\"_is_physical_interface_enhanced\" is not defined",
-	"source": "Pylance",
-	"startLineNumber": 626,
-	"startColumn": 27,
-	"endLineNumber": 626,
-	"endColumn": 58
-},{
-	"resource": "/c:/kisa-network-analyzer/rules/checks_nw.py",
-	"owner": "pylance",
-	"code": {
-		"value": "reportUndefinedVariable",
-		"target": {
-			"$mid": 1,
-			"path": "/microsoft/pylance-release/blob/main/docs/diagnostics/reportUndefinedVariable.md",
-			"scheme": "https",
-			"authority": "github.com"
-		}
-	},
-	"severity": 4,
-	"message": "\"_check_interface_exceptions\" is not defined",
-	"source": "Pylance",
-	"startLineNumber": 637,
-	"startColumn": 28,
-	"endLineNumber": 637,
-	"endColumn": 55
-}]
+def check_nw_23(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
+    """NW-23: API 응답에 디버깅 정보 포함"""
+    vulnerabilities = []
+    debug_log = []  # 디버깅 정보를 여기에 저장
+    
+    debug_log.append("🔍 NW-23 상세 디버깅 시작")
+    
+    if not hasattr(context, 'parsed_interfaces'):
+        debug_log.append("❌ ERROR: parsed_interfaces 없음!")
+        return [{
+            'line': 0,
+            'matched_text': 'DEBUG: parsed_interfaces 없음',
+            'details': {
+                'debug_log': debug_log,
+                'error': 'parsed_interfaces 속성이 존재하지 않음'
+            }
+        }]
+    
+    total_interfaces = len(context.parsed_interfaces)
+    debug_log.append(f"📊 총 {total_interfaces}개 인터페이스 발견")
+    debug_log.append(f"인터페이스 목록: {list(context.parsed_interfaces.keys())}")
+    
+    # GigabitEthernet0/2 특별 분석
+    target = "GigabitEthernet0/2"
+    if target in context.parsed_interfaces:
+        config = context.parsed_interfaces[target]
+        debug_log.append(f"\n🎯 {target} 발견!")
+        debug_log.append(f"   Config 내용: {config}")
+        
+        # 각 단계별 판정 결과를 저장할 딕셔너리
+        analysis_results = {}
+        
+        # 1. 사용 여부 판단
+        try:
+            is_used = _is_interface_used_enhanced(target, config, context.parsed_interfaces)
+            analysis_results['is_used'] = is_used
+            debug_log.append(f"   1. is_used: {is_used}")
+        except Exception as e:
+            analysis_results['is_used'] = True
+            analysis_results['is_used_error'] = str(e)
+            debug_log.append(f"   1. is_used: ERROR - {e}")
+            is_used = True
+        
+        # 2. 활성화 상태
+        is_active = not config.get('is_shutdown', True)
+        analysis_results['is_active'] = is_active
+        analysis_results['raw_is_shutdown'] = config.get('is_shutdown')
+        debug_log.append(f"   2. is_active: {is_active} (raw is_shutdown: {config.get('is_shutdown')})")
+        
+        # 3. 중요 인터페이스 확인
+        try:
+            is_critical_old = _is_critical_interface_nw23(target, context.device_type)
+            analysis_results['is_critical_old'] = is_critical_old
+            debug_log.append(f"   3a. is_critical_old: {is_critical_old}")
+        except Exception as e:
+            analysis_results['is_critical_old'] = True
+            analysis_results['is_critical_old_error'] = str(e)
+            debug_log.append(f"   3a. is_critical_old: ERROR - {e}")
+            is_critical_old = True
+            
+        try:
+            is_critical_new = _is_critical_interface_enhanced(target, context.device_type, config)
+            analysis_results['is_critical_new'] = is_critical_new
+            debug_log.append(f"   3b. is_critical_new: {is_critical_new}")
+        except Exception as e:
+            analysis_results['is_critical_new'] = True
+            analysis_results['is_critical_new_error'] = str(e)
+            debug_log.append(f"   3b. is_critical_new: ERROR - {e}")
+            is_critical_new = True
+            
+        is_critical = is_critical_old or is_critical_new
+        analysis_results['is_critical_final'] = is_critical
+        debug_log.append(f"   3c. is_critical (final): {is_critical}")
+        
+        # 4. 물리적 인터페이스 확인
+        try:
+            is_physical = _is_physical_interface_enhanced(target, context.device_type)
+            analysis_results['is_physical'] = is_physical
+            debug_log.append(f"   4. is_physical: {is_physical}")
+        except Exception as e:
+            analysis_results['is_physical'] = False
+            analysis_results['is_physical_error'] = str(e)
+            debug_log.append(f"   4. is_physical: ERROR - {e}")
+            is_physical = False
+        
+        # 5. 예외 상황 확인
+        try:
+            is_exception = _check_interface_exceptions(target, config)
+            analysis_results['is_exception'] = is_exception
+            debug_log.append(f"   5. is_exception: {is_exception}")
+        except Exception as e:
+            analysis_results['is_exception'] = True
+            analysis_results['is_exception_error'] = str(e)
+            debug_log.append(f"   5. is_exception: ERROR - {e}")
+            is_exception = True
+        
+        # 최종 판정
+        should_be_vulnerability = (not is_used and is_active and not is_critical and is_physical and not is_exception)
+        analysis_results['should_be_vulnerability'] = should_be_vulnerability
+        
+        debug_log.append(f"\n🧪 최종 판정:")
+        debug_log.append(f"   조건: (not is_used) AND is_active AND (not is_critical) AND is_physical AND (not is_exception)")
+        debug_log.append(f"   계산: ({not is_used}) AND {is_active} AND ({not is_critical}) AND {is_physical} AND ({not is_exception})")
+        debug_log.append(f"   결과: {should_be_vulnerability}")
+        
+        if should_be_vulnerability:
+            debug_log.append(f"   ✅ 취약점으로 판정!")
+        else:
+            # 어떤 조건 때문에 막혔는지 분석
+            blocking_reasons = []
+            if is_used: blocking_reasons.append("is_used=True")
+            if not is_active: blocking_reasons.append("is_active=False") 
+            if is_critical: blocking_reasons.append("is_critical=True")
+            if not is_physical: blocking_reasons.append("is_physical=False")
+            if is_exception: blocking_reasons.append("is_exception=True")
+            
+            analysis_results['blocking_reasons'] = blocking_reasons
+            debug_log.append(f"   ❌ 차단 이유: {blocking_reasons}")
+        
+        # 결과 반환 (디버깅 정보 포함)
+        vulnerabilities.append({
+            'line': config.get('line_number', 56),
+            'matched_text': f"DEBUG: {target} 상세 분석 결과",
+            'details': {
+                'interface_name': target,
+                'reason': f'디버깅 완료 - 취약점 여부: {should_be_vulnerability}',
+                'debug_log': debug_log,
+                'analysis_results': analysis_results,
+                'raw_config': config
+            }
+        })
+        
+    else:
+        debug_log.append(f"❌ {target} 인터페이스를 찾을 수 없음!")
+        available = list(context.parsed_interfaces.keys())
+        debug_log.append(f"사용 가능한 인터페이스: {available}")
+        
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': f"DEBUG: {target} not found",
+            'details': {
+                'reason': f'{target} 인터페이스가 파싱되지 않음',
+                'available_interfaces': available,
+                'debug_log': debug_log
+            }
+        })
+    
+    return vulnerabilities
 
 
 # =========================== 헬퍼 함수들 ===========================
