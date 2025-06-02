@@ -574,44 +574,68 @@ def check_nw_23(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
     is_shutdown = config.get('is_shutdown', True)
     line_number = config.get('line_number', 56)
     
-    # 디버깅 메시지 생성
-    debug_msg = f"DEBUG: {target} | IP:{has_ip} DESC:{has_desc} SHUTDOWN:{is_shutdown}"
-    
-    # 상세 정보 추가
-    if 'config_lines' in config:
-        config_lines_count = len(config.get('config_lines', []))
-        debug_msg += f" | CONFIG_LINES:{config_lines_count}"
-    
     # 취약점 판정
     is_vulnerable = not has_ip and not has_desc and not is_shutdown
     
     if is_vulnerable:
-        debug_msg += " | RESULT:VULNERABLE ✅"
-    else:
-        debug_msg += " | RESULT:SAFE ❌"
+        # 취약점 발견 시 - 구체적인 위험 사유 제공
+        risk_factors = []
+        if not has_ip:
+            risk_factors.append("IP 주소 미설정")
+        if not has_desc:
+            risk_factors.append("용도 설명 없음")
+        if not is_shutdown:
+            risk_factors.append("활성화 상태")
         
-        # 왜 안전한지 이유 추가
-        reasons = []
-        if has_ip: reasons.append("HAS_IP")
-        if has_desc: reasons.append("HAS_DESC") 
-        if is_shutdown: reasons.append("IS_SHUTDOWN")
+        matched_text = f"interface {target}"
+        reason = f"미사용 인터페이스 보안 위험: {', '.join(risk_factors)}"
         
-        debug_msg += f" | REASONS:{','.join(reasons)}"
-    
-    return [{
-        'line': line_number,
-        'matched_text': debug_msg,
-        'details': {
-            'interface_name': target,
-            'reason': 'Basic debugging analysis',
-            'basic_check': {
-                'has_ip_address': has_ip,
-                'has_description': has_desc,
-                'is_shutdown': is_shutdown,
-                'is_vulnerable': is_vulnerable
+        return [{
+            'line': line_number,
+            'matched_text': matched_text,
+            'details': {
+                'interface_name': target,
+                'reason': reason,
+                'security_risks': {
+                    'unauthorized_access': '물리적 접근 시 불법 네트워크 침입 가능',
+                    'network_exposure': '네트워크 정보 유출 위험',
+                    'attack_vector': '내부 네트워크 공격 경로로 활용 가능'
+                },
+                'detection_criteria': {
+                    'no_ip_address': not has_ip,
+                    'no_description': not has_desc,
+                    'not_shutdown': not is_shutdown
+                },
+                'recommended_action': 'interface shutdown 명령어로 인터페이스 비활성화'
             }
-        }
-    }]
+        }]
+    else:
+        # 안전한 경우 - 안전한 이유 제공
+        safe_reasons = []
+        if has_ip:
+            safe_reasons.append("IP 주소 설정됨")
+        if has_desc:
+            safe_reasons.append("용도 설명 있음") 
+        if is_shutdown:
+            safe_reasons.append("이미 비활성화됨")
+        
+        matched_text = f"interface {target} 분석 완료"
+        reason = f"보안상 안전: {', '.join(safe_reasons)}"
+        
+        return [{
+            'line': line_number,
+            'matched_text': matched_text,
+            'details': {
+                'interface_name': target,
+                'reason': reason,
+                'safety_status': '취약점 없음',
+                'analysis_result': {
+                    'has_ip_address': has_ip,
+                    'has_description': has_desc,
+                    'is_shutdown': is_shutdown
+                }
+            }
+        }]
 
 
 # =========================== 헬퍼 함수들 ===========================
