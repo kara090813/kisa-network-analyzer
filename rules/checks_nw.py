@@ -644,7 +644,7 @@ def _comprehensive_usage_analysis(interface_name, interface_config, context, net
 
 
 def _enhanced_basic_usage_check(interface_name, interface_config, all_interfaces):
-    """향상된 기본 사용 여부 체크"""
+    """향상된 기본 사용 여부 체크 - 수정됨"""
     
     # 기본 사용 지표들
     basic_indicators = [
@@ -659,6 +659,18 @@ def _enhanced_basic_usage_check(interface_name, interface_config, all_interfaces
     if any(basic_indicators):
         return True
     
+    # "no ip address"가 명시된 경우 미사용으로 강하게 판단
+    config_lines = interface_config.get('config_lines', [])
+    config_text = ' '.join(config_lines).lower()
+    if 'no ip address' in config_text:
+        # 다른 의미있는 설정이 있는지 추가 확인
+        meaningful_configs = [
+            'encapsulation', 'tunnel', 'bridge-group', 'channel-group',
+            'switchport', 'vlan', 'access-group', 'service-policy'
+        ]
+        if not any(config in config_text for config in meaningful_configs):
+            return False  # 명시적으로 미사용으로 판단
+    
     # 향상된 검사들
     enhanced_checks = [
         _has_meaningful_ip_config(interface_config),
@@ -671,7 +683,7 @@ def _enhanced_basic_usage_check(interface_name, interface_config, all_interfaces
 
 
 def _analyze_configuration_complexity(interface_config):
-    """설정 복잡도 기반 사용 가능성 분석 (보안 중심)"""
+    """설정 복잡도 기반 사용 가능성 분석 (보안 중심) - 수정됨"""
     config_lines = interface_config.get('config_lines', [])
     config_text = ' '.join(config_lines).lower()
     
@@ -680,14 +692,18 @@ def _analyze_configuration_complexity(interface_config):
         'has_ip_address': 0.40 if interface_config.get('has_ip_address') else 0,  # IP가 가장 중요
         'has_meaningful_description': 0.25 if interface_config.get('has_description') and len(interface_config.get('description', '').strip()) > 0 else 0,
         'has_security_config': 0.20 if any(kw in config_text for kw in ['port-security', 'storm-control', 'access-group']) else 0,
-        'has_vlan_config': 0.15 if any(kw in config_text for kw in ['switchport', 'vlan', 'trunk']) else 0,
+        'has_vlan_config': 0.15 if any(kw in config_text for kw in ['switchport', 'vlan', 'trunk', 'encapsulation dot1q']) else 0,
         'has_qos_config': 0.10 if any(kw in config_text for kw in ['qos', 'service-policy']) else 0,
-        # duplex/speed 설정은 기본 설정으로 낮은 가중치
-        'basic_physical_config': 0.05 if any(kw in config_text for kw in ['speed', 'duplex']) else 0
+        # duplex/speed 설정은 기본 설정으로 제거 또는 매우 낮은 가중치
+        'basic_physical_config': 0.01 if any(kw in config_text for kw in ['speed auto', 'duplex auto']) and not any(kw in config_text for kw in ['speed 100', 'speed 1000', 'duplex full', 'duplex half']) else 0.02 if any(kw in config_text for kw in ['speed', 'duplex']) else 0
     }
     
+    # 추가: "no ip address"가 명시적으로 설정된 경우 사용하지 않음을 강하게 시사
+    if 'no ip address' in config_text:
+        complexity_scores['explicit_no_ip'] = -0.15  # 음수 점수로 미사용 가능성 증가
+    
     total_complexity = sum(complexity_scores.values())
-    usage_probability = total_complexity  # 복잡할수록 사용 중일 가능성 높음
+    usage_probability = max(0.0, total_complexity)  # 음수가 되지 않도록 보정
     
     return {
         'usage_probability': usage_probability,
