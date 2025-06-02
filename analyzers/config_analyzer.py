@@ -96,8 +96,8 @@ class MultiFrameworkAnalyzer:
             self.logger.error(f"구현되지 않은 지침서: {target_framework}")
             raise NotImplementedError(f"{target_framework} 지침서는 아직 구현되지 않았습니다")
         
-        # 컨텍스트 파싱 - 향상된 버전
-        config_context = self._enhanced_parse_context(request.config_text, request.device_type)
+        # 설정 컨텍스트 파싱
+        config_context = parse_config_context(request.config_text, request.device_type)
         
         # 룰 필터링 (특정 룰 지정된 경우)
         if not request.options.check_all_rules and request.options.specific_rule_ids:
