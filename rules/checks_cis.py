@@ -10,6 +10,8 @@ from typing import List, Dict, Any
 from .kisa_rules import ConfigContext
 
 
+# ======================= 1.1 Local Authentication, Authorization and Accounting (AAA) Rules =======================
+
 def check_cis_1_1_1(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-1.1.1: Enable 'aaa new-model' - AAA 시스템 활성화 확인"""
     vulnerabilities = []
@@ -288,6 +290,341 @@ def check_cis_1_1_11(line: str, line_num: int, context: ConfigContext) -> List[D
                 'recommendation': 'aaa accounting system default start-stop group tacacs+ 명령어를 설정하세요',
                 'impact': '시스템 이벤트에 대한 감사 추적 기능 사용 불가',
                 'level': 'Level 2'
+            }
+        })
+    
+    return vulnerabilities
+
+
+# ======================= 2.1 Global Service Rules =======================
+
+def check_cis_2_1_1_1_1(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
+    """CIS-2.1.1.1.1: Set the 'hostname' - 호스트명 설정 확인"""
+    vulnerabilities = []
+    
+    # 호스트명 설정 확인
+    hostname_lines = [line for line in context.config_lines if line.strip().startswith('hostname ')]
+    
+    if not hostname_lines:
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': 'hostname 설정 누락',
+            'details': {
+                'vulnerability': 'hostname_not_configured',
+                'description': '호스트명이 설정되지 않음',
+                'recommendation': 'hostname {router_name} 명령어를 설정하세요',
+                'impact': 'SSH 서비스 구성을 위한 전제 조건 미충족'
+            }
+        })
+    else:
+        # 기본 호스트명 사용 여부 확인
+        for hostname_line in hostname_lines:
+            if 'hostname Router' in hostname_line:
+                vulnerabilities.append({
+                    'line': 0,
+                    'matched_text': hostname_line.strip(),
+                    'details': {
+                        'vulnerability': 'default_hostname_used',
+                        'description': '기본 호스트명 "Router"를 사용함',
+                        'recommendation': '의미있는 호스트명으로 변경하세요',
+                        'impact': '장비 식별 및 관리의 어려움'
+                    }
+                })
+    
+    return vulnerabilities
+
+
+def check_cis_2_1_1_1_2(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
+    """CIS-2.1.1.1.2: Set the 'ip domain name' - 도메인명 설정 확인"""
+    vulnerabilities = []
+    
+    # IP domain name 설정 확인
+    has_domain_name = 'ip domain name' in context.full_config
+    
+    if not has_domain_name:
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': 'ip domain name 설정 누락',
+            'details': {
+                'vulnerability': 'ip_domain_name_missing',
+                'description': 'IP 도메인명이 설정되지 않음',
+                'recommendation': 'ip domain name {domain-name} 명령어를 설정하세요',
+                'impact': 'SSH 서비스 구성을 위한 전제 조건 미충족'
+            }
+        })
+    
+    return vulnerabilities
+
+
+def check_cis_2_1_1_1_3(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
+    """CIS-2.1.1.1.3: Set 'modulus' to greater than or equal to 2048 - RSA 키 확인"""
+    vulnerabilities = []
+    
+    # RSA 키 생성 확인 (실제로는 show crypto key mypubkey rsa 명령어로 확인해야 함)
+    # 설정 파일에서는 crypto key generate rsa 명령어가 저장되지 않으므로 간접적으로 확인
+    has_ssh_version = 'ip ssh version' in context.full_config
+    has_domain_name = 'ip domain name' in context.full_config
+    hostname_configured = any('hostname ' in line and 'Router' not in line for line in context.config_lines)
+    
+    # SSH가 설정되어 있지만 전제 조건들이 충족되지 않은 경우
+    if has_ssh_version and not (has_domain_name and hostname_configured):
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': 'RSA 키 생성을 위한 전제 조건 미충족',
+            'details': {
+                'vulnerability': 'rsa_key_prerequisites_missing',
+                'description': 'RSA 키 생성을 위한 hostname 및 domain name이 설정되지 않음',
+                'recommendation': 'crypto key generate rsa general-keys modulus 2048 명령어를 실행하세요',
+                'impact': 'SSH 서비스 사용 불가'
+            }
+        })
+    
+    return vulnerabilities
+
+
+def check_cis_2_1_1_1_4(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
+    """CIS-2.1.1.1.4: Set 'seconds' for 'ip ssh timeout' - SSH 타임아웃 확인"""
+    vulnerabilities = []
+    
+    # SSH timeout 설정 확인
+    has_ssh_timeout = 'ip ssh time-out' in context.full_config
+    
+    if not has_ssh_timeout:
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': 'ip ssh time-out 설정 누락',
+            'details': {
+                'vulnerability': 'ssh_timeout_missing',
+                'description': 'SSH 타임아웃이 설정되지 않음',
+                'recommendation': 'ip ssh time-out 60 명령어를 설정하세요',
+                'impact': '비활성 SSH 세션이 무제한으로 유지될 수 있음'
+            }
+        })
+    
+    return vulnerabilities
+
+
+def check_cis_2_1_1_1_5(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
+    """CIS-2.1.1.1.5: Set maximum value for 'ip ssh authentication-retries' - SSH 인증 재시도 확인"""
+    vulnerabilities = []
+    
+    # SSH authentication-retries 설정 확인
+    has_ssh_auth_retries = 'ip ssh authentication-retries' in context.full_config
+    
+    if not has_ssh_auth_retries:
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': 'ip ssh authentication-retries 설정 누락',
+            'details': {
+                'vulnerability': 'ssh_authentication_retries_missing',
+                'description': 'SSH 인증 재시도 횟수가 설정되지 않음',
+                'recommendation': 'ip ssh authentication-retries 3 명령어를 설정하세요',
+                'impact': '무제한 인증 시도로 인한 브루트 포스 공격 위험'
+            }
+        })
+    
+    return vulnerabilities
+
+
+def check_cis_2_1_1_2(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
+    """CIS-2.1.1.2: Set version 2 for 'ip ssh version' - SSH 버전 확인"""
+    vulnerabilities = []
+    
+    # SSH version 2 설정 확인
+    has_ssh_version_2 = 'ip ssh version 2' in context.full_config
+    
+    if not has_ssh_version_2:
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': 'ip ssh version 2 설정 누락',
+            'details': {
+                'vulnerability': 'ssh_version_2_missing',
+                'description': 'SSH 버전 2가 설정되지 않음',
+                'recommendation': 'ip ssh version 2 명령어를 설정하세요',
+                'impact': '취약한 SSH 버전 1 사용 가능'
+            }
+        })
+    
+    return vulnerabilities
+
+
+def check_cis_2_1_2(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
+    """CIS-2.1.2: Set 'no cdp run' - CDP 서비스 비활성화 확인"""
+    vulnerabilities = []
+    
+    # CDP 서비스 상태 확인
+    has_cdp_run = 'cdp run' in context.full_config
+    has_no_cdp_run = 'no cdp run' in context.full_config
+    
+    # cdp run이 있고 no cdp run이 없는 경우
+    if has_cdp_run and not has_no_cdp_run:
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': 'cdp run',
+            'details': {
+                'vulnerability': 'cdp_enabled',
+                'description': 'CDP 서비스가 활성화되어 있음',
+                'recommendation': 'no cdp run 명령어를 설정하여 CDP를 비활성화하세요',
+                'impact': '정보 노출 및 DoS 공격 위험'
+            }
+        })
+    # 명시적으로 no cdp run이 없는 경우 (기본적으로 활성화됨)
+    elif not has_no_cdp_run:
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': 'CDP 서비스 비활성화 설정 누락',
+            'details': {
+                'vulnerability': 'cdp_not_disabled',
+                'description': 'CDP 서비스가 명시적으로 비활성화되지 않음',
+                'recommendation': 'no cdp run 명령어를 설정하세요',
+                'impact': '정보 노출 및 DoS 공격 위험'
+            }
+        })
+    
+    return vulnerabilities
+
+
+def check_cis_2_1_3(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
+    """CIS-2.1.3: Set 'no ip bootp server' - BOOTP 서버 비활성화 확인"""
+    vulnerabilities = []
+    
+    # BOOTP 서버 상태 확인
+    has_bootp_server = 'ip bootp server' in context.full_config
+    has_no_bootp_server = 'no ip bootp server' in context.full_config
+    
+    if has_bootp_server and not has_no_bootp_server:
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': 'ip bootp server',
+            'details': {
+                'vulnerability': 'bootp_server_enabled',
+                'description': 'BOOTP 서버가 활성화되어 있음',
+                'recommendation': 'no ip bootp server 명령어를 설정하세요',
+                'impact': '불필요한 IP 주소 할당 서비스로 인한 보안 위험'
+            }
+        })
+    
+    return vulnerabilities
+
+
+def check_cis_2_1_4(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
+    """CIS-2.1.4: Set 'no service dhcp' - DHCP 서비스 비활성화 확인"""
+    vulnerabilities = []
+    
+    # DHCP 서비스 상태 확인 (기존 context.parsed_services 활용)
+    dhcp_service_enabled = context.parsed_services.get('dhcp', True)  # 기본값은 활성화
+    
+    if dhcp_service_enabled:
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': 'DHCP 서비스 활성화',
+            'details': {
+                'vulnerability': 'dhcp_service_enabled',
+                'description': 'DHCP 서비스가 활성화되어 있음',
+                'recommendation': 'no service dhcp 명령어를 설정하세요',
+                'impact': '불필요한 DHCP 서비스로 인한 DoS 공격 위험'
+            }
+        })
+    
+    return vulnerabilities
+
+
+def check_cis_2_1_5(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
+    """CIS-2.1.5: Set 'no ip identd' - identd 서버 비활성화 확인"""
+    vulnerabilities = []
+    
+    # identd 서비스 상태 확인
+    has_ip_identd = 'ip identd' in context.full_config
+    has_no_ip_identd = 'no ip identd' in context.full_config
+    
+    # ip identd가 명시적으로 활성화되어 있거나, 비활성화되지 않은 경우
+    if has_ip_identd and not has_no_ip_identd:
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': 'ip identd',
+            'details': {
+                'vulnerability': 'identd_enabled',
+                'description': 'identd 서버가 활성화되어 있음',
+                'recommendation': 'no ip identd 명령어를 설정하세요',
+                'impact': '정보 노출 위험'
+            }
+        })
+    elif not has_no_ip_identd:
+        # 기본적으로 활성화되어 있으므로 명시적 비활성화 필요
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': 'identd 서비스 비활성화 설정 누락',
+            'details': {
+                'vulnerability': 'identd_not_disabled',
+                'description': 'identd 서버가 명시적으로 비활성화되지 않음',
+                'recommendation': 'no ip identd 명령어를 설정하세요',
+                'impact': '정보 노출 위험'
+            }
+        })
+    
+    return vulnerabilities
+
+
+def check_cis_2_1_6(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
+    """CIS-2.1.6: Set 'service tcp-keepalives-in' - TCP keepalives-in 확인"""
+    vulnerabilities = []
+    
+    # TCP keepalives-in 서비스 확인
+    tcp_keepalives_in_enabled = context.parsed_services.get('tcp-keepalives-in', False)
+    
+    if not tcp_keepalives_in_enabled:
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': 'service tcp-keepalives-in 설정 누락',
+            'details': {
+                'vulnerability': 'tcp_keepalives_in_missing',
+                'description': 'TCP keepalives-in 서비스가 설정되지 않음',
+                'recommendation': 'service tcp-keepalives-in 명령어를 설정하세요',
+                'impact': '유휴 인커밍 연결이 정리되지 않아 리소스 낭비 및 보안 위험'
+            }
+        })
+    
+    return vulnerabilities
+
+
+def check_cis_2_1_7(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
+    """CIS-2.1.7: Set 'service tcp-keepalives-out' - TCP keepalives-out 확인"""
+    vulnerabilities = []
+    
+    # TCP keepalives-out 서비스 확인
+    tcp_keepalives_out_enabled = context.parsed_services.get('tcp-keepalives-out', False)
+    
+    if not tcp_keepalives_out_enabled:
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': 'service tcp-keepalives-out 설정 누락',
+            'details': {
+                'vulnerability': 'tcp_keepalives_out_missing',
+                'description': 'TCP keepalives-out 서비스가 설정되지 않음',
+                'recommendation': 'service tcp-keepalives-out 명령어를 설정하세요',
+                'impact': '유휴 아웃고잉 연결이 정리되지 않아 리소스 낭비 및 보안 위험'
+            }
+        })
+    
+    return vulnerabilities
+
+
+def check_cis_2_1_8(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
+    """CIS-2.1.8: Set 'no service pad' - PAD 서비스 비활성화 확인"""
+    vulnerabilities = []
+    
+    # PAD 서비스 상태 확인
+    pad_service_enabled = context.parsed_services.get('pad', True)  # 기본값은 활성화
+    
+    if pad_service_enabled:
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': 'PAD 서비스 활성화',
+            'details': {
+                'vulnerability': 'pad_service_enabled',
+                'description': 'X.25 PAD 서비스가 활성화되어 있음',
+                'recommendation': 'no service pad 명령어를 설정하세요',
+                'impact': '불필요한 X.25 PAD 서비스로 인한 보안 위험'
             }
         })
     
