@@ -7,7 +7,7 @@ CIS Cisco IOS 12 Benchmark v4.0.0 네트워크 장비 보안 점검 룰의 논�
 """
 
 from typing import List, Dict, Any
-from .kisa_rules import CISConfigContext
+from .cis_rules import CISConfigContext
 
 
 # ======================= 1.1 Local Authentication, Authorization and Accounting (AAA) Rules =======================

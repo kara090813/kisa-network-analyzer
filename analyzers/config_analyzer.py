@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-analyzers/config_analyzer.py (Enhanced Multi-Framework Version with NW Support)
-네트워크 장비 설정 파일 분석 엔진 - 다중 지침서 완전 지원 + NW 룰셋 추가
+analyzers/config_analyzer.py (Enhanced Multi-Framework Version with CIS Support Fixed)
+네트워크 장비 설정 파일 분석 엔진 - 다중 지침서 완전 지원 + CIS 룰셋 오류 수정
 
 수정사항:
-- NW 가이드 룰셋 지원 추가
-- 룰 로더 시스템 인라인 구현
-- 실제 다중 지침서 분석 기능 구현
-- CIS 룰셋 연동 완료
-- API 호출 시 지침서 선택 기능 활성화
+- CIS 룰셋 import 추가
+- RuleLoader에서 CIS 지원 완전 구현
+- CIS 룰 개수 정확히 반영 (11개 → 실제 개수)
+- CISConfigContext 문제 해결
+- API 호출 시 CIS 지침서 선택 기능 활성화
 """
 
 import re
@@ -17,7 +17,7 @@ from typing import List, Dict, Optional, Tuple, Any, Set
 import logging
 from collections import defaultdict
 
-# 룰셋 직접 import
+# 룰셋 직접 import (CIS 추가)
 from rules.kisa_rules import (
     KISA_RULES,
     SecurityRule, 
@@ -29,6 +29,9 @@ from rules.kisa_rules import (
 # NW 룰셋 import
 from rules.nw_rules import NW_RULES
 
+# CIS 룰셋 import 추가
+from rules.cis_rules import CIS_RULES
+
 from models.analysis_request import AnalysisRequest
 from models.analysis_response import (
     VulnerabilityIssue, AnalysisResult, AnalysisStatistics
@@ -36,7 +39,7 @@ from models.analysis_response import (
 
 
 class RuleLoader:
-    """룰 로더 시스템 - 인라인 구현"""
+    """룰 로더 시스템 - 인라인 구현 (CIS 지원 완전 추가)"""
     
     SUPPORTED_SOURCES = {
         'KISA': {
@@ -56,12 +59,12 @@ class RuleLoader:
             'status': 'active'
         },
         'CIS': {
-            'name': 'CIS Benchmarks',
-            'description': 'Center for Internet Security Benchmarks',
-            'version': 'v1.0',
-            'coverage': 'Industry standard security benchmarks',
-            'rules_count': 0,
-            'status': 'planned'
+            'name': 'CIS Cisco IOS 12 Benchmark',
+            'description': 'Center for Internet Security Cisco IOS 12 Benchmark v4.0.0',
+            'version': 'v4.0.0',
+            'coverage': 'Industry standard Cisco security benchmarks',
+            'rules_count': len(CIS_RULES),  # 실제 CIS 룰 개수 반영
+            'status': 'active'  # planned → active로 변경
         },
         'NIST': {
             'name': 'NIST Cybersecurity Framework',
@@ -75,14 +78,16 @@ class RuleLoader:
     
     @classmethod
     def load_rules(cls, framework: str) -> Dict[str, SecurityRule]:
-        """지침서별 룰 로드"""
+        """지침서별 룰 로드 (CIS 지원 추가)"""
         framework = framework.upper()
         
         if framework == 'KISA':
             return KISA_RULES.copy()
         elif framework == 'NW':
             return NW_RULES.copy()
-        elif framework in ['CIS', 'NIST']:
+        elif framework == 'CIS':  # CIS 지원 추가
+            return CIS_RULES.copy()
+        elif framework == 'NIST':
             raise NotImplementedError(f"{framework} 지침서는 아직 구현되지 않았습니다")
         else:
             raise ValueError(f"지원되지 않는 지침서: {framework}")
@@ -209,7 +214,7 @@ def validate_rule_compatibility(framework: str, device_type: str, rule_ids: List
 
 
 class MultiFrameworkAnalyzer:
-    """다중 지침서 분석기 - 완전 구현 버전 (NW 지원 추가)"""
+    """다중 지침서 분석기 - 완전 구현 버전 (CIS 지원 완전 추가)"""
     
     def __init__(self, default_framework: str = "KISA"):
         """
@@ -279,7 +284,7 @@ class MultiFrameworkAnalyzer:
             self.logger.error(f"구현되지 않은 지침서: {target_framework}")
             raise NotImplementedError(f"{target_framework} 지침서는 아직 구현되지 않았습니다")
         
-        # 설정 컨텍스트 파싱
+        # 설정 컨텍스트 파싱 (모든 지침서에서 동일한 ConfigContext 사용)
         config_context = parse_config_context(request.config_text, request.device_type)
         
         # 룰 필터링 (특정 룰 지정된 경우)
@@ -326,7 +331,7 @@ class MultiFrameworkAnalyzer:
         options,
         framework: str
     ) -> List[VulnerabilityIssue]:
-        """실제 분석 수행"""
+        """실제 분석 수행 (CIS 지원 포함)"""
         vulnerabilities = []
         
         logical_rules_used = 0
@@ -335,7 +340,7 @@ class MultiFrameworkAnalyzer:
         for rule_id, rule in rules.items():
             rule_vulnerabilities = []
             
-            # 1. 논리 기반 분석 (우선순위) - NW 룰셋에서 강화됨
+            # 1. 논리 기반 분석 (우선순위) - CIS 룰셋에서도 지원
             if rule.logical_check_function:
                 try:
                     logical_results = rule.logical_check_function("", 0, context)
@@ -436,7 +441,7 @@ class MultiFrameworkAnalyzer:
         )
     
     def get_supported_device_types(self, framework: str = None) -> List[str]:
-        """지원되는 장비 타입 반환"""
+        """지원되는 장비 타입 반환 (CIS 지원 포함)"""
         target_framework = (framework or self.default_framework).upper()
         
         try:
@@ -449,7 +454,7 @@ class MultiFrameworkAnalyzer:
             return ["Cisco", "Juniper", "Radware", "Passport", "Piolink", "HP", "Alcatel", "Extreme", "Dasan"]
     
     def get_available_rules(self, framework: str = None) -> List[Dict[str, Any]]:
-        """사용 가능한 룰 목록 반환"""
+        """사용 가능한 룰 목록 반환 (CIS 지원 포함)"""
         target_framework = (framework or self.default_framework).upper()
         
         try:
@@ -498,7 +503,7 @@ class MultiFrameworkAnalyzer:
         return errors
     
     def analyze_single_line(self, line: str, device_type: str, rule_ids: Optional[List[str]] = None, framework: str = None) -> List[VulnerabilityIssue]:
-        """단일 라인 분석"""
+        """단일 라인 분석 (CIS 지원 포함)"""
         target_framework = (framework or self.default_framework).upper()
         
         try:
@@ -552,7 +557,7 @@ class MultiFrameworkAnalyzer:
         }
     
     def compare_frameworks(self, request: AnalysisRequest, frameworks: List[str]) -> Dict[str, AnalysisResult]:
-        """여러 지침서로 동시 분석 및 비교"""
+        """여러 지침서로 동시 분석 및 비교 (CIS 포함)"""
         results = {}
         
         for framework in frameworks:
@@ -567,7 +572,7 @@ class MultiFrameworkAnalyzer:
         return results
     
     def get_framework_coverage(self, device_type: str) -> Dict[str, Dict[str, Any]]:
-        """장비 타입별 지침서 커버리지 정보"""
+        """장비 타입별 지침서 커버리지 정보 (CIS 포함)"""
         coverage = {}
         
         for framework in self.supported_frameworks:
