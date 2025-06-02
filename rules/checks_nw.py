@@ -548,11 +548,11 @@ def check_nw_21(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
 
 
 def check_nw_23(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """NW-23: 사용하지 않는 인터페이스의 Shutdown 설정 - 원본 config 직접 파싱"""
+    """NW-23: 사용하지 않는 인터페이스의 Shutdown 설정 - 로직 수정된 버전"""
     vulnerabilities = []
     
     try:
-        print(f"\n=== NW-23 RAW CONFIG 파싱 시작 ===")
+        print(f"\n=== NW-23 로직 수정된 버전 시작 ===")
         
         # 1. 원본 config에서 인터페이스 직접 추출
         if hasattr(context, 'config_lines'):
@@ -587,14 +587,13 @@ def check_nw_23(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
                 current_interface = interface_name
                 current_config = [line_clean]
                 interfaces[interface_name] = {'line_number': i + 1}
-                print(f"인터페이스 발견: {interface_name} (라인 {i + 1})")
                 
             # 인터페이스 내부 설정
             elif current_interface and (line_clean.startswith(' ') or line_clean == ''):
                 if line_clean:  # 빈 줄이 아닌 경우만
                     current_config.append(line_clean)
                     
-            # 인터페이스 블록 종료 (새로운 섹션 시작 또는 파일 끝)
+            # 인터페이스 블록 종료
             elif current_interface and line_clean and not line_clean.startswith(' '):
                 # 이전 인터페이스 저장
                 interfaces[current_interface] = {
@@ -612,14 +611,14 @@ def check_nw_23(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
             }
         
         print(f"파싱된 인터페이스 수: {len(interfaces)}")
-        for name in interfaces.keys():
-            print(f"  - {name}")
         
         # 3. 각 인터페이스 분석
         for interface_name, interface_data in interfaces.items():
             print(f"\n--- 분석 중: {interface_name} ---")
             config_lines = interface_data['config_lines']
-            print(f"설정 라인 수: {len(config_lines)}")
+            
+            # 설정 라인들 출력 (디버깅용)
+            print(f"설정 라인들:")
             for line in config_lines:
                 print(f"  {line}")
             
@@ -641,99 +640,123 @@ def check_nw_23(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
                 continue
             
             # Step 2: shutdown 확인
-            has_shutdown = any('shutdown' in line.strip().lower() for line in config_lines[1:])  # 첫 번째 라인(interface) 제외
-            print(f"  -> shutdown 설정: {has_shutdown}")
+            has_shutdown = False
+            for line in config_lines[1:]:  # 첫 번째 라인(interface) 제외
+                if 'shutdown' in line.strip().lower():
+                    has_shutdown = True
+                    print(f"    -> shutdown 발견: {line.strip()}")
+                    break
             
+            print(f"  -> shutdown 설정: {has_shutdown}")
             if has_shutdown:
                 continue
             
-            # Step 3: 사용 여부 확인
+            # Step 3: 사용 여부 확인 (개선된 로직)
             
-            # IP 주소 확인
+            # IP 주소 확인 (더 정확하게)
             has_real_ip = False
             has_no_ip = False
-            for line in config_lines:
-                line_lower = line.strip().lower()
-                if 'ip address' in line_lower:
-                    if 'no ip address' in line_lower:
+            for line in config_lines[1:]:  # interface 라인 제외
+                line_clean = line.strip()
+                line_lower = line_clean.lower()
+                
+                if line_lower.startswith('ip address'):
+                    if line_lower.startswith('no ip address'):
                         has_no_ip = True
-                        print(f"    -> 'no ip address' 발견: {line.strip()}")
-                    elif not 'dhcp' in line_lower:
+                        print(f"    -> 'no ip address' 발견: {line_clean}")
+                    elif 'dhcp' not in line_lower:
+                        # 실제 IP 주소 (예: ip address 1.2.3.4 255.255.255.0)
                         has_real_ip = True
-                        print(f"    -> 실제 IP 주소 발견: {line.strip()}")
+                        print(f"    -> 실제 IP 주소 발견: {line_clean}")
             
-            # 설명 확인
-            has_description = any('description' in line.strip().lower() for line in config_lines)
-            if has_description:
-                for line in config_lines:
-                    if 'description' in line.strip().lower():
-                        print(f"    -> 설명 발견: {line.strip()}")
-                        break
+            # 설명 확인 (더 정확하게)
+            has_description = False
+            for line in config_lines[1:]:
+                line_clean = line.strip()
+                if line_clean.lower().startswith('description'):
+                    has_description = True
+                    print(f"    -> 설명 발견: {line_clean}")
+                    break
             
             # VLAN 설정 확인
-            vlan_keywords = ['switchport', 'encapsulation dot1q', 'trunk']
             has_vlan = False
-            for line in config_lines:
+            vlan_keywords = ['switchport', 'encapsulation dot1q', 'trunk']
+            for line in config_lines[1:]:
                 line_lower = line.strip().lower()
-                if any(keyword in line_lower for keyword in vlan_keywords):
-                    has_vlan = True
-                    print(f"    -> VLAN 설정 발견: {line.strip()}")
+                for keyword in vlan_keywords:
+                    if keyword in line_lower:
+                        has_vlan = True
+                        print(f"    -> VLAN 설정 발견: {line.strip()}")
+                        break
+                if has_vlan:
                     break
             
             # 기타 의미있는 설정
-            meaningful_keywords = ['channel-group', 'port-security', 'access-group']
             has_meaningful = False
-            for line in config_lines:
+            meaningful_keywords = ['channel-group', 'port-security', 'access-group', 'service-policy']
+            for line in config_lines[1:]:
                 line_lower = line.strip().lower()
-                if any(keyword in line_lower for keyword in meaningful_keywords):
-                    has_meaningful = True
-                    print(f"    -> 의미있는 설정 발견: {line.strip()}")
+                for keyword in meaningful_keywords:
+                    if keyword in line_lower:
+                        has_meaningful = True
+                        print(f"    -> 의미있는 설정 발견: {line.strip()}")
+                        break
+                if has_meaningful:
                     break
             
-            print(f"  -> IP: {has_real_ip}, 설명: {has_description}, VLAN: {has_vlan}, 기타: {has_meaningful}")
+            print(f"  -> 사용 여부 분석:")
+            print(f"     실제 IP: {has_real_ip}")
+            print(f"     설명: {has_description}")
+            print(f"     VLAN: {has_vlan}")
+            print(f"     기타 설정: {has_meaningful}")
             
-            # Step 4: 중요 인터페이스 예외
+            # Step 4: 중요 인터페이스 예외 (개선된 로직)
             is_critical = False
             
             # 관리 인터페이스
-            if any(mgmt in name_lower for mgmt in ['management', 'mgmt', 'console']):
+            mgmt_patterns = ['management', 'mgmt', 'console']
+            if any(mgmt in name_lower for mgmt in mgmt_patterns):
                 is_critical = True
-                print(f"  -> 관리 인터페이스")
+                print(f"  -> 관리 인터페이스로 중요함")
             
             # 설명에 중요 키워드
-            if has_description:
-                for line in config_lines:
-                    if 'description' in line.lower():
+            if has_description and not is_critical:
+                for line in config_lines[1:]:
+                    if line.strip().lower().startswith('description'):
                         desc_line = line.lower()
-                        important_words = ['uplink', 'trunk', 'core', 'wan', 'internet', 'isp', 'link to']
+                        important_words = ['uplink', 'trunk', 'core', 'wan', 'internet', 'isp', 'link']
                         if any(word in desc_line for word in important_words):
                             is_critical = True
-                            print(f"  -> 중요 설명: {line.strip()}")
+                            print(f"  -> 중요 설명 키워드 발견: {line.strip()}")
                         break
             
-            # 0/0 포트이면서 사용 중
-            if '0/0' in interface_name and (has_real_ip or has_description or has_vlan):
-                is_critical = True
-                print(f"  -> 0/0 포트이면서 사용 중")
+            # 첫 번째 포트 (0/0)이면서 사용 중인 경우 (더 정확한 매칭)
+            is_first_port = (interface_name.endswith('0/0') or 
+                           interface_name.endswith('0/0/0') or
+                           '/0/0' in interface_name)
             
-            # 서브인터페이스 확인
+            if is_first_port and (has_real_ip or has_description or has_vlan or has_meaningful):
+                is_critical = True
+                print(f"  -> 첫 번째 포트(0/0)이면서 사용 중이므로 중요함")
+            
+            # 서브인터페이스가 있는 경우
             base_name = interface_name.split('.')[0]
             subinterfaces = [name for name in interfaces.keys() if name.startswith(f"{base_name}.")]
             if subinterfaces:
                 is_critical = True
                 print(f"  -> 서브인터페이스 있음: {subinterfaces}")
             
-            print(f"  -> 중요 인터페이스: {is_critical}")
+            print(f"  -> 중요 인터페이스 판정: {is_critical}")
             
             # Step 5: 최종 판정
             is_used = has_real_ip or has_description or has_vlan or has_meaningful
             is_vulnerable = not is_used and not is_critical
             
-            print(f"  -> 사용 중: {is_used}")
-            print(f"  -> 취약점: {is_vulnerable}")
+            print(f"  -> 최종 사용 중: {is_used}")
+            print(f"  -> 최종 취약점 여부: {is_vulnerable}")
             
             if is_vulnerable:
-                print(f"  *** 취약점 발견! ***")
+                print(f"  *** 취약점 발견: {interface_name} ***")
                 vulnerabilities.append({
                     'line': interface_data['line_number'],
                     'matched_text': f"interface {interface_name}",
@@ -741,18 +764,20 @@ def check_nw_23(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
                         'interface_name': interface_name,
                         'reason': 'Unused physical interface not shutdown',
                         'security_risk': 'Potential unauthorized physical access point',
-                        'config_analysis': {
+                        'analysis': {
                             'has_real_ip': has_real_ip,
                             'has_no_ip': has_no_ip,
                             'has_description': has_description,
                             'has_vlan': has_vlan,
                             'has_meaningful': has_meaningful,
                             'is_critical': is_critical,
-                            'raw_config': config_lines
+                            'is_first_port': is_first_port if 'is_first_port' in locals() else False
                         },
                         'recommendation': 'Add "shutdown" command to disable unused interface'
                     }
                 })
+            else:
+                print(f"  -> 취약점이 아님 (사용 중이거나 중요한 인터페이스)")
         
         print(f"\n=== 최종 결과: {len(vulnerabilities)}개 취약점 발견 ===")
         

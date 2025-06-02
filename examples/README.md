@@ -22,7 +22,7 @@
 ### API 테스트
 ```bash
 # 취약한 설정 분석
-curl -X POST http://localhost:5000/api/v1/config-analyze \
+curl -X POST https://kisa-network-analyzer-production.up.railway.app/api/v1/config-analyze \
   -H "Content-Type: application/json" \
   -d "{
     \"deviceType\": \"Cisco\",
@@ -31,7 +31,7 @@ curl -X POST http://localhost:5000/api/v1/config-analyze \
   }"
 
 # 보안 설정 분석  
-curl -X POST http://localhost:5000/api/v1/config-analyze \
+curl -X POST https://kisa-network-analyzer-production.up.railway.app/api/v1/config-analyze \
   -H "Content-Type: application/json" \
   -d "{
     \"deviceType\": \"Cisco\", 
@@ -49,7 +49,7 @@ with open('examples/cisco_vulnerable.cfg', 'r') as f:
     config = f.read()
 
 # 분석 요청
-response = requests.post('http://localhost:5000/api/v1/config-analyze', 
+response = requests.post('https://kisa-network-analyzer-production.up.railway.app/api/v1/config-analyze', 
     json={
         'deviceType': 'Cisco',
         'configText': config,

@@ -16,7 +16,7 @@ from typing import Dict, Any
 class APITester:
     """API 테스트 클래스"""
     
-    def __init__(self, base_url: str = "http://localhost:5000"):
+    def __init__(self, base_url: str = "https://kisa-network-analyzer-production.up.railway.app"):
         self.base_url = base_url.rstrip('/')
         self.session = requests.Session()
         
@@ -328,8 +328,8 @@ def main():
     parser = argparse.ArgumentParser(description='KISA API 테스트')
     parser.add_argument(
         '--url', 
-        default='http://localhost:5000',
-        help='API 서버 URL (기본: http://localhost:5000)'
+        default='https://kisa-network-analyzer-production.up.railway.app',
+        help='API 서버 URL (기본: https://kisa-network-analyzer-production.up.railway.app)'
     )
     parser.add_argument(
         '--test',

@@ -312,6 +312,7 @@ def get_all_supported_frameworks() -> List[str]:
 def get_implemented_frameworks() -> List[str]:
     """
     실제 구현된 지침서 이름 반환
+
     
     Returns:
         List[str]: 구현된 지침서 이름 리스트

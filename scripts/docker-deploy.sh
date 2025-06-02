@@ -47,4 +47,4 @@ echo "Deployment completed!"
 # 서비스 상태 확인
 echo "Checking service health..."
 sleep 10
-curl -f http://localhost:5000/api/v1/health || echo "Health check failed"
+curl -f https://kisa-network-analyzer-production.up.railway.app/api/v1/health || echo "Health check failed"
