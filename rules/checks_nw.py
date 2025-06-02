@@ -547,151 +547,312 @@ def check_nw_21(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
     return vulnerabilities
 
 
-def check_nw_23(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """NW-23: 상세 디버깅 버전"""
-    vulnerabilities = []
+[{
+	"resource": "/c:/kisa-network-analyzer/rules/checks_nw.py",
+	"owner": "pylance",
+	"code": {
+		"value": "reportUndefinedVariable",
+		"target": {
+			"$mid": 1,
+			"path": "/microsoft/pylance-release/blob/main/docs/diagnostics/reportUndefinedVariable.md",
+			"scheme": "https",
+			"authority": "github.com"
+		}
+	},
+	"severity": 4,
+	"message": "\"_is_interface_used_enhanced\" is not defined",
+	"source": "Pylance",
+	"startLineNumber": 584,
+	"startColumn": 23,
+	"endLineNumber": 584,
+	"endColumn": 50
+},{
+	"resource": "/c:/kisa-network-analyzer/rules/checks_nw.py",
+	"owner": "pylance",
+	"code": {
+		"value": "reportUndefinedVariable",
+		"target": {
+			"$mid": 1,
+			"path": "/microsoft/pylance-release/blob/main/docs/diagnostics/reportUndefinedVariable.md",
+			"scheme": "https",
+			"authority": "github.com"
+		}
+	},
+	"severity": 4,
+	"message": "\"_is_critical_interface_enhanced\" is not defined",
+	"source": "Pylance",
+	"startLineNumber": 611,
+	"startColumn": 31,
+	"endLineNumber": 611,
+	"endColumn": 62
+},{
+	"resource": "/c:/kisa-network-analyzer/rules/checks_nw.py",
+	"owner": "pylance",
+	"code": {
+		"value": "reportUndefinedVariable",
+		"target": {
+			"$mid": 1,
+			"path": "/microsoft/pylance-release/blob/main/docs/diagnostics/reportUndefinedVariable.md",
+			"scheme": "https",
+			"authority": "github.com"
+		}
+	},
+	"severity": 4,
+	"message": "\"_is_physical_interface_enhanced\" is not defined",
+	"source": "Pylance",
+	"startLineNumber": 626,
+	"startColumn": 27,
+	"endLineNumber": 626,
+	"endColumn": 58
+},{
+	"resource": "/c:/kisa-network-analyzer/rules/checks_nw.py",
+	"owner": "pylance",
+	"code": {
+		"value": "reportUndefinedVariable",
+		"target": {
+			"$mid": 1,
+			"path": "/microsoft/pylance-release/blob/main/docs/diagnostics/reportUndefinedVariable.md",
+			"scheme": "https",
+			"authority": "github.com"
+		}
+	},
+	"severity": 4,
+	"message": "\"_check_interface_exceptions\" is not defined",
+	"source": "Pylance",
+	"startLineNumber": 637,
+	"startColumn": 28,
+	"endLineNumber": 637,
+	"endColumn": 55
+}]
+
+
+# =========================== 헬퍼 함수들 ===========================
+
+def _is_interface_used_enhanced(interface_name: str, interface_config: dict, all_interfaces: dict) -> bool:
+    """개선된 인터페이스 사용 여부 판별"""
     
-    print(f"\n{'='*80}")
-    print(f"🔍 NW-23 상세 디버깅 시작")
-    print(f"{'='*80}")
+    # 기본 사용 지표들
+    basic_usage = (
+        interface_config.get('has_ip_address', False) or
+        interface_config.get('has_description', False) or
+        interface_config.get('has_vlan', False) or
+        interface_config.get('is_loopback', False) or
+        interface_config.get('is_management', False) or
+        interface_config.get('has_switchport', False)
+    )
     
-    if not hasattr(context, 'parsed_interfaces'):
-        print("❌ ERROR: parsed_interfaces 없음!")
-        return vulnerabilities
+    if basic_usage:
+        return True
     
-    total_interfaces = len(context.parsed_interfaces)
-    print(f"📊 총 {total_interfaces}개 인터페이스 발견")
+    # 향상된 검사들
+    enhanced_checks = [
+        _has_meaningful_ip_config(interface_config),
+        _is_channel_member(interface_config),
+        _has_active_subinterfaces(interface_name, all_interfaces),
+        _has_special_protocol_config(interface_config)
+    ]
     
-    # GigabitEthernet0/2 특별 분석
-    target = "GigabitEthernet0/2"
-    if target in context.parsed_interfaces:
-        config = context.parsed_interfaces[target]
-        print(f"\n🎯 {target} 상세 분석:")
-        print(f"   전체 config: {config}")
-        
-        # 단계별 판정
-        print(f"\n📋 단계별 판정:")
-        
-        # 1. 사용 여부 판단
-        try:
-            is_used = _is_interface_used_enhanced(target, config, context.parsed_interfaces)
-            print(f"   1. is_used: {is_used}")
-        except Exception as e:
-            print(f"   1. is_used: ERROR - {e}")
-            is_used = True  # 에러 시 안전하게 사용 중으로 처리
-        
-        # 2. 활성화 상태
-        is_active = not config.get('is_shutdown', True)
-        print(f"   2. is_active: {is_active} (is_shutdown: {config.get('is_shutdown')})")
-        
-        # 3. 중요 인터페이스 확인
-        try:
-            is_critical_old = _is_critical_interface_nw23(target, context.device_type)
-            print(f"   3a. is_critical_old: {is_critical_old}")
-        except Exception as e:
-            print(f"   3a. is_critical_old: ERROR - {e}")
-            is_critical_old = True
-            
-        try:
-            is_critical_new = _is_critical_interface_enhanced(target, context.device_type, config)
-            print(f"   3b. is_critical_new: {is_critical_new}")
-        except Exception as e:
-            print(f"   3b. is_critical_new: ERROR - {e}")
-            is_critical_new = True
-            
-        is_critical = is_critical_old or is_critical_new
-        print(f"   3c. is_critical (final): {is_critical}")
-        
-        # 4. 물리적 인터페이스 확인
-        try:
-            is_physical = _is_physical_interface_enhanced(target, context.device_type)
-            print(f"   4. is_physical: {is_physical}")
-        except Exception as e:
-            print(f"   4. is_physical: ERROR - {e}")
-            is_physical = False
-        
-        # 5. 예외 상황 확인
-        try:
-            is_exception = _check_interface_exceptions(target, config)
-            print(f"   5. is_exception: {is_exception}")
-        except Exception as e:
-            print(f"   5. is_exception: ERROR - {e}")
-            is_exception = True
-        
-        # 최종 판정
-        should_be_vulnerability = (not is_used and is_active and not is_critical and is_physical and not is_exception)
-        print(f"\n🧪 최종 판정:")
-        print(f"   조건: (not is_used) AND is_active AND (not is_critical) AND is_physical AND (not is_exception)")
-        print(f"   계산: ({not is_used}) AND {is_active} AND ({not is_critical}) AND {is_physical} AND ({not is_exception})")
-        print(f"   결과: {should_be_vulnerability}")
-        
-        if should_be_vulnerability:
-            print(f"   ✅ 취약점으로 판정되어야 함!")
-            vulnerabilities.append({
-                'line': config.get('line_number', 0),
-                'matched_text': f"interface {target}",
-                'details': {
-                    'interface_name': target,
-                    'reason': 'DEBUG: 상세 분석 결과 취약점',
-                    'debug_analysis': {
-                        'is_used': is_used,
-                        'is_active': is_active,
-                        'is_critical_old': is_critical_old,
-                        'is_critical_new': is_critical_new,
-                        'is_critical_final': is_critical,
-                        'is_physical': is_physical,
-                        'is_exception': is_exception
-                    }
-                }
-            })
-        else:
-            print(f"   ❌ 취약점이 아닌 것으로 판정됨")
-            
-            # 어떤 조건 때문에 막혔는지 분석
-            blocking_reasons = []
-            if is_used: blocking_reasons.append("is_used=True")
-            if not is_active: blocking_reasons.append("is_active=False") 
-            if is_critical: blocking_reasons.append("is_critical=True")
-            if not is_physical: blocking_reasons.append("is_physical=False")
-            if is_exception: blocking_reasons.append("is_exception=True")
-            
-            print(f"   차단 이유: {blocking_reasons}")
-            
-            # 디버깅 정보로 취약점 생성
-            vulnerabilities.append({
-                'line': config.get('line_number', 0),
-                'matched_text': f"DEBUG: {target} 분석 완료",
-                'details': {
-                    'interface_name': target,
-                    'reason': f'디버깅: 취약점 아님 - {", ".join(blocking_reasons)}',
-                    'debug_analysis': {
-                        'is_used': is_used,
-                        'is_active': is_active,
-                        'is_critical': is_critical,
-                        'is_physical': is_physical,
-                        'is_exception': is_exception,
-                        'blocking_reasons': blocking_reasons
-                    }
-                }
-            })
+    return any(enhanced_checks)
+
+
+def _has_meaningful_ip_config(interface_config: dict) -> bool:
+    """의미있는 IP 설정이 있는지 확인"""
+    config_lines = interface_config.get('config_lines', [])
+    config_text = ' '.join(config_lines).lower()
+    
+    # DHCP 설정
+    if 'ip address dhcp' in config_text:
+        return True
+    
+    # PPP 등 특수 프로토콜
+    special_protocols = ['ppp', 'frame-relay', 'atm', 'hdlc']
+    if any(protocol in config_text for protocol in special_protocols):
+        return True
+    
+    # IPv6 설정
+    if 'ipv6 address' in config_text and 'ipv6 address autoconfig' not in config_text:
+        return True
+    
+    return False
+
+
+def _is_channel_member(interface_config: dict) -> bool:
+    """포트 채널 멤버인지 확인"""
+    config_lines = interface_config.get('config_lines', [])
+    config_text = ' '.join(config_lines).lower()
+    
+    channel_indicators = [
+        'channel-group', 'port-channel', 'lag', 'etherchannel',
+        'bundle', 'aggregat'  # aggregation의 부분 매치
+    ]
+    
+    return any(indicator in config_text for indicator in channel_indicators)
+
+
+def _has_active_subinterfaces(interface_name: str, all_interfaces: dict) -> bool:
+    """해당 인터페이스에 활성 서브인터페이스가 있는지 확인"""
+    for intf_name in all_interfaces:
+        # 서브인터페이스 패턴: GigabitEthernet0/1.100
+        if intf_name.startswith(f"{interface_name}.") or intf_name.startswith(f"{interface_name}:"):
+            subintf = all_interfaces[intf_name]
+            if not subintf.get('is_shutdown', True):
+                # 서브인터페이스가 실제로 사용 중인지 확인
+                if (subintf.get('has_ip_address') or 
+                    subintf.get('has_vlan') or 
+                    subintf.get('has_description')):
+                    return True
+    return False
+
+
+def _has_special_protocol_config(interface_config: dict) -> bool:
+    """특수 프로토콜 설정이 있는지 확인"""
+    config_lines = interface_config.get('config_lines', [])
+    config_text = ' '.join(config_lines).lower()
+    
+    special_configs = [
+        'spanning-tree', 'storm-control', 'port-security',
+        'flowcontrol', 'duplex', 'speed', 'mtu',
+        'access-list', 'service-policy', 'qos'
+    ]
+    
+    return any(config in config_text for config in special_configs)
+
+
+def _is_physical_interface_enhanced(interface_name: str, device_type: str) -> bool:
+    """향상된 물리적 인터페이스 판별"""
+    interface_lower = interface_name.lower()
+    
+    # 가상/논리 인터페이스 제외
+    virtual_patterns = [
+        'loopback', 'tunnel', 'vlan', 'bvi', 'dialer',
+        'multilink', 'virtual', 'template', 'null'
+    ]
+    
+    if any(pattern in interface_lower for pattern in virtual_patterns):
+        return False
+    
+    # 장비별 물리 인터페이스 패턴
+    if device_type in ["Cisco"]:
+        physical_patterns = [
+            'fastethernet', 'gigabitethernet', 'tengigabitethernet',
+            'ethernet', 'serial', 'bri', 'pri', 'atm',
+            'fa', 'gi', 'te', 'eth', 'se'
+        ]
+    elif device_type in ["Juniper"]:
+        physical_patterns = [
+            'ge-', 'xe-', 'et-', 'fe-', 'so-', 'as-', 'at-'
+        ]
+    elif device_type in ["HP", "Alcatel"]:
+        # 슬롯/포트 형태: 1/1/1, 2/1/5 등
+        import re
+        if re.match(r'^\d+/\d+(/\d+)?$', interface_name):
+            return True
+        physical_patterns = ['ethernet', 'gigabit', 'fast']
+    elif device_type in ["Extreme", "Dasan"]:
+        physical_patterns = [
+            'ethernet', 'gigabit', 'fast', 'ten',
+            'ge', 'fe', 'te', 'xe'
+        ]
     else:
-        print(f"❌ {target} 인터페이스를 찾을 수 없음!")
-        available = list(context.parsed_interfaces.keys())
-        print(f"사용 가능한 인터페이스: {available}")
-        
-        vulnerabilities.append({
-            'line': 0,
-            'matched_text': f"DEBUG: {target} not found",
-            'details': {
-                'reason': f'{target} 인터페이스가 파싱되지 않음',
-                'available_interfaces': available
-            }
-        })
+        # 기본 패턴
+        physical_patterns = [
+            'ethernet', 'fast', 'giga', 'ten', 'serial'
+        ]
     
-    print(f"\n🎯 NW-23 디버깅 완료: {len(vulnerabilities)}개 결과")
-    print(f"{'='*80}\n")
+    return any(pattern in interface_lower for pattern in physical_patterns)
+
+
+def _is_critical_interface_enhanced(interface_name: str, device_type: str, interface_config: dict) -> bool:
+    """향상된 중요 인터페이스 판별"""
+    interface_lower = interface_name.lower()
     
-    return vulnerabilities
+    # 기본 중요 인터페이스
+    basic_critical = [
+        'loopback', 'management', 'mgmt', 'tunnel', 'vlan1',
+        'console', 'null', 'dialer'
+    ]
+    
+    if any(pattern in interface_lower for pattern in basic_critical):
+        return True
+    
+    # 설명(description)에 중요 키워드가 있는 경우
+    description = interface_config.get('description', '').lower()
+    critical_keywords = [
+        'uplink', 'trunk', 'core', 'wan', 'internet',
+        'backup', 'standby', 'primary', 'main', 'isp',
+        'dc', 'datacenter', 'server', 'critical'
+    ]
+    
+    if any(keyword in description for keyword in critical_keywords):
+        return True
+    
+    # 첫 번째 포트 (장비별로 다르게 처리)
+    if _is_first_port_enhanced(interface_name, device_type):
+        return True
+    
+    # Serial 인터페이스는 실제 설정이 있는 경우만 중요
+    if interface_lower.startswith('serial'):
+        # IP 주소나 의미있는 설명이 있으면 중요
+        return (interface_config.get('has_ip_address') or 
+                interface_config.get('has_description') or
+                _has_meaningful_ip_config(interface_config))
+    
+    return False
+
+
+def _is_first_port_enhanced(interface_name: str, device_type: str) -> bool:
+    """장비별 첫 번째 포트 판별 개선"""
+    interface_lower = interface_name.lower()
+    
+    if device_type == "Cisco":
+        first_ports = [
+            'ethernet0/0', 'fastethernet0/0', 'gigabitethernet0/0',
+            'fa0/0', 'gi0/0', 'eth0/0', 'te0/0'
+        ]
+    elif device_type == "Juniper":
+        first_ports = [
+            'ge-0/0/0', 'xe-0/0/0', 'et-0/0/0', 'fe-0/0/0'
+        ]
+    elif device_type in ["HP"]:
+        first_ports = ['1/1/1', '1/1', '1/0/1', 'a1', 'b1']
+    elif device_type in ["Alcatel"]:
+        first_ports = ['1/1/1', '1/1', '2/1/1']
+    elif device_type in ["Extreme"]:
+        first_ports = ['1:1', '1', '2:1']
+    elif device_type in ["Dasan"]:
+        first_ports = ['1/1', '1/0/1', 'ethernet1/1']
+    else:
+        first_ports = ['0/0', '0/1', '1/1', '1/0']
+    
+    return any(first_port == interface_lower or 
+               interface_lower.endswith(first_port) for first_port in first_ports)
+
+
+def _check_interface_exceptions(interface_name: str, interface_config: dict) -> bool:
+    """인터페이스 예외 상황 체크"""
+    
+    # 설명 기반 예외처리
+    description = interface_config.get('description', '').lower()
+    exception_keywords = [
+        'backup', 'standby', 'reserve', 'spare', 'emergency',
+        'planned', 'future', 'expansion', 'prepared', 'temp',
+        'test', 'debug', 'monitor', 'oob'  # out-of-band
+    ]
+    
+    if any(keyword in description for keyword in exception_keywords):
+        return True
+    
+    # 임시 설정 지시자
+    config_lines = interface_config.get('config_lines', [])
+    config_text = ' '.join(config_lines).lower()
+    temp_indicators = [
+        'temp-enable', 'temporary', 'testing', 'debug-mode'
+    ]
+    
+    if any(indicator in config_text for indicator in temp_indicators):
+        return True
+    
+    return False
 
 
 # 기존 함수 유지 (호환성)
