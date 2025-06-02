@@ -548,110 +548,99 @@ def check_nw_21(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
 
 
 def check_nw_23(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """NW-23: 사용하지 않는 인터페이스의 Shutdown 설정 - 간소화된 버전"""
+    """NW-23: 사용하지 않는 인터페이스의 Shutdown 설정 - 초간단 버전"""
     vulnerabilities = []
     
-    print(f"=== check_nw_23 실행 시작 ===")
-    print(f"총 인터페이스 수: {len(context.parsed_interfaces)}")
-    
     for interface_name, interface_config in context.parsed_interfaces.items():
-        print(f"\n검사 중인 인터페이스: {interface_name}")
         
-        # 1. 물리적 인터페이스 확인 (간단하게)
+        # 1. 물리적 인터페이스만 체크 (가상 인터페이스 제외)
         interface_lower = interface_name.lower()
-        is_physical = any(phy_type in interface_lower for phy_type in [
-            'gigabitethernet', 'fastethernet', 'ethernet', 'tengigabitethernet', 
-            'gi', 'fa', 'eth', 'te', 'serial'
-        ])
-        print(f"  물리적 인터페이스: {is_physical}")
         
-        if not is_physical:
+        # 가상 인터페이스 제외
+        if any(virtual in interface_lower for virtual in [
+            'loopback', 'tunnel', 'vlan', 'bvi', 'dialer', 'null'
+        ]):
             continue
             
-        # 2. Shutdown 상태 확인
+        # 물리적 인터페이스 확인
+        if not any(physical in interface_lower for physical in [
+            'gigabitethernet', 'fastethernet', 'ethernet', 'tengigabitethernet',
+            'gi', 'fa', 'eth', 'te', 'serial'
+        ]):
+            continue
+        
+        # 2. shutdown 되지 않은 인터페이스만 체크
         config_lines = interface_config.get('config_lines', [])
-        config_text = ' '.join(config_lines).lower()
-        
-        # shutdown 키워드 직접 확인
-        is_shutdown_explicit = any('shutdown' in line.lower() for line in config_lines)
-        is_shutdown_from_config = interface_config.get('is_shutdown', False)
-        is_shutdown = is_shutdown_explicit or is_shutdown_from_config
-        
-        print(f"  shutdown 설정됨 (명시적): {is_shutdown_explicit}")
-        print(f"  shutdown 설정됨 (파싱): {is_shutdown_from_config}")
-        print(f"  최종 shutdown 상태: {is_shutdown}")
+        is_shutdown = any('shutdown' in line.strip().lower() for line in config_lines if line.strip())
         
         if is_shutdown:
             continue
             
-        # 3. 사용 여부 확인 (매우 간단하게)
-        has_ip_address = interface_config.get('has_ip_address', False)
-        has_description = interface_config.get('has_description', False)
-        has_vlan = interface_config.get('has_vlan', False)
+        # 3. 미사용 인터페이스 판별 (매우 간단)
         
-        # config_lines에서 직접 확인
-        has_ip_direct = any('ip address' in line.lower() and 'no ip address' not in line.lower() 
-                           for line in config_lines)
-        has_desc_direct = any('description' in line.lower() for line in config_lines)
-        has_vlan_direct = any(vlan_keyword in config_text for vlan_keyword in [
+        # IP 주소 확인
+        has_real_ip = False
+        for line in config_lines:
+            line_clean = line.strip().lower()
+            if ('ip address' in line_clean and 
+                'no ip address' not in line_clean and
+                'dhcp' not in line_clean):  # 실제 IP 주소 설정
+                has_real_ip = True
+                break
+        
+        # 설명 확인
+        has_description = any('description' in line.strip().lower() for line in config_lines)
+        
+        # VLAN/스위치포트 설정 확인
+        config_text = ' '.join(config_lines).lower()
+        has_vlan_config = any(vlan_keyword in config_text for vlan_keyword in [
             'switchport', 'vlan', 'encapsulation dot1q', 'trunk'
         ])
         
-        # 의미있는 설정 확인
-        meaningful_configs = any(keyword in config_text for keyword in [
+        # 기타 의미있는 설정 확인
+        has_meaningful_config = any(config_keyword in config_text for config_keyword in [
             'channel-group', 'port-security', 'spanning-tree', 'access-group',
-            'service-policy', 'tunnel', 'bridge-group'
+            'service-policy', 'tunnel', 'bridge-group', 'storm-control'
         ])
         
-        print(f"  IP 주소 (파싱): {has_ip_address}, (직접): {has_ip_direct}")
-        print(f"  설명 (파싱): {has_description}, (직접): {has_desc_direct}")
-        print(f"  VLAN (파싱): {has_vlan}, (직접): {has_vlan_direct}")
-        print(f"  의미있는 설정: {meaningful_configs}")
-        
-        # 사용 중인 것으로 판단되는 조건들
-        is_used = (has_ip_address or has_ip_direct or 
-                   has_description or has_desc_direct or
-                   has_vlan or has_vlan_direct or
-                   meaningful_configs)
-        
-        print(f"  사용 중으로 판정: {is_used}")
-        
-        # 4. 중요 인터페이스 예외 처리 (간단하게)
+        # 4. 중요 인터페이스 예외 처리 (최소한만)
         is_critical = False
         
-        # 기본 중요 인터페이스들
-        if any(critical in interface_lower for critical in [
-            'loopback', 'management', 'mgmt', 'tunnel', 'vlan1', 'console'
-        ]):
+        # 기본 관리 인터페이스
+        if any(mgmt in interface_lower for mgmt in ['management', 'mgmt', 'console']):
             is_critical = True
             
-        # 설명에 중요 키워드가 있는 경우
-        description = interface_config.get('description', '').lower()
-        if description and any(keyword in description for keyword in [
-            'uplink', 'trunk', 'core', 'wan', 'internet', 'isp', 'link to'
-        ]):
+        # 설명에 중요 키워드
+        if has_description:
+            description_text = ''
+            for line in config_lines:
+                if 'description' in line.lower():
+                    description_text = line.lower()
+                    break
+            
+            if any(keyword in description_text for keyword in [
+                'uplink', 'trunk', 'core', 'wan', 'internet', 'isp', 'link'
+            ]):
+                is_critical = True
+        
+        # 첫 번째 포트이면서 실제 사용 중인 경우
+        if ('0/0' in interface_name and 
+            (has_real_ip or has_description or has_vlan_config)):
             is_critical = True
             
-        # 첫 번째 포트 (0/0)이고 실제로 사용 중인 경우만
-        if ('0/0' in interface_name or interface_name.endswith('0/0')) and is_used:
-            is_critical = True
-            
-        # 서브인터페이스가 있는 경우 (직접 확인)
+        # 서브인터페이스가 있는 경우 (Gi0/1.10 같은 게 있으면 Gi0/1은 중요)
         base_interface = interface_name.split('.')[0]
-        has_subinterfaces = any(intf_name.startswith(f"{base_interface}.") 
-                               for intf_name in context.parsed_interfaces.keys())
+        has_subinterfaces = any(
+            intf_name.startswith(f"{base_interface}.") 
+            for intf_name in context.parsed_interfaces.keys()
+        )
         if has_subinterfaces:
             is_critical = True
-            print(f"  서브인터페이스 있음: {has_subinterfaces}")
-            
-        print(f"  중요 인터페이스: {is_critical}")
         
-        # 5. 최종 판정
-        is_vulnerable = not is_shutdown and not is_used and not is_critical
-        print(f"  최종 취약점 판정: {is_vulnerable}")
+        # 5. 최종 판정: 미사용이면서 중요하지 않은 인터페이스
+        is_unused = not (has_real_ip or has_description or has_vlan_config or has_meaningful_config)
         
-        if is_vulnerable:
-            print(f"  >>> {interface_name} 취약점으로 추가! <<<")
+        if is_unused and not is_critical:
             vulnerabilities.append({
                 'line': interface_config.get('line_number', 0),
                 'matched_text': f"interface {interface_name}",
@@ -661,19 +650,17 @@ def check_nw_23(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
                     'reason': 'Unused physical interface not shutdown',
                     'security_risk': 'Potential unauthorized physical access point',
                     'analysis_summary': {
-                        'is_shutdown': is_shutdown,
-                        'is_used': is_used,
+                        'has_real_ip': has_real_ip,
+                        'has_description': has_description,
+                        'has_vlan_config': has_vlan_config,
+                        'has_meaningful_config': has_meaningful_config,
                         'is_critical': is_critical,
-                        'has_ip': has_ip_address or has_ip_direct,
-                        'has_description': has_description or has_desc_direct,
-                        'has_vlan': has_vlan or has_vlan_direct,
-                        'meaningful_configs': meaningful_configs
+                        'has_subinterfaces': has_subinterfaces
                     },
-                    'recommendation': 'Shutdown unused interface to prevent unauthorized access'
+                    'recommendation': 'Add "shutdown" command to disable unused interface'
                 }
             })
     
-    print(f"\n=== check_nw_23 완료: 총 {len(vulnerabilities)}개 취약점 발견 ===")
     return vulnerabilities
 
 
@@ -923,58 +910,50 @@ def _analyze_port_density(interface_name, all_interfaces):
 
 # =========================== 헬퍼 함수들 ===========================
 
+# NW-23용 간단한 헬퍼 함수들 (기존 복잡한 함수들 대체)
+
 def _has_meaningful_ip_config(interface_config):
-    """의미있는 IP 설정 확인"""
+    """의미있는 IP 설정 확인 - 간소화"""
     config_lines = interface_config.get('config_lines', [])
     config_text = ' '.join(config_lines).lower()
     
-    meaningful_indicators = [
-        'ip address dhcp',
-        'ipv6 address',
-        'ppp',
-        'frame-relay',
-        'atm',
-        'tunnel'
-    ]
-    
-    return any(indicator in config_text for indicator in meaningful_indicators)
-
+    # 간단한 의미있는 IP 설정들
+    return any(indicator in config_text for indicator in [
+        'ip address dhcp', 'ipv6 address', 'ppp', 'tunnel'
+    ])
 
 def _is_channel_member(interface_config):
-    """포트 채널 멤버 확인"""
+    """포트 채널 멤버 확인 - 간소화"""
     config_lines = interface_config.get('config_lines', [])
     config_text = ' '.join(config_lines).lower()
     
-    channel_indicators = ['channel-group', 'port-channel', 'lag', 'etherchannel']
-    return any(indicator in config_text for indicator in channel_indicators)
-
+    return any(indicator in config_text for indicator in [
+        'channel-group', 'port-channel', 'lag'
+    ])
 
 def _has_active_subinterfaces(interface_name, all_interfaces):
-    """활성 서브인터페이스 확인"""
+    """활성 서브인터페이스 확인 - 간소화"""
     for intf_name in all_interfaces:
         if intf_name.startswith(f"{interface_name}."):
             subintf = all_interfaces[intf_name]
-            if not subintf.get('is_shutdown', True):
+            config_lines = subintf.get('config_lines', [])
+            # shutdown이 명시적으로 설정되지 않은 서브인터페이스가 있으면 True
+            is_shutdown = any('shutdown' in line.strip().lower() for line in config_lines)
+            if not is_shutdown:
                 return True
     return False
 
-
 def _has_special_protocol_config(interface_config):
-    """특수 프로토콜 설정 확인"""
+    """특수 프로토콜 설정 확인 - 간소화"""
     config_lines = interface_config.get('config_lines', [])
     config_text = ' '.join(config_lines).lower()
     
-    special_configs = [
-        'spanning-tree', 'storm-control', 'port-security',
-        'flowcontrol', 'service-policy', 'access-list'
-    ]
-    
-    return any(config in config_text for config in special_configs)
+    return any(config in config_text for config in [
+        'spanning-tree', 'storm-control', 'port-security'
+    ])
 
-
-def _is_physical_interface_enhanced(interface_name, device_type):
-    """향상된 물리 인터페이스 판별"""
-    interface_lower = interface_name.lower()
+# 기존 복잡한 함수들은 NW-23에서 사용하지 않으므로 제거 가능
+# 만약 다른 룰에서 사용한다면 별도 파일로 분리하는 것을 권장
     
     # 가상 인터페이스 제외
     virtual_patterns = ['loopback', 'tunnel', 'vlan', 'bvi', 'dialer', 'null']
