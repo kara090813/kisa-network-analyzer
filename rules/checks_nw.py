@@ -548,42 +548,55 @@ def check_nw_21(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
 
 
 def check_nw_23(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """NW-23: 강제 실행 확인"""
+    """NW-23: 상세 데이터 분석"""
     
-    # 1. 무조건 실행되는지 확인
-    result = {
-        'line': 999,
-        'matched_text': 'NW-23 강제 실행됨 - 함수 정상 작동',
-        'details': {'test_status': 'function_executed'}
-    }
+    target = "GigabitEthernet0/2"
+    config = context.parsed_interfaces[target]
     
-    # 2. context 확인
-    if hasattr(context, 'parsed_interfaces'):
-        interfaces_count = len(context.parsed_interfaces)
-        interfaces_list = list(context.parsed_interfaces.keys())
-        
-        result['matched_text'] = f'NW-23 실행됨 | 인터페이스 {interfaces_count}개 발견'
-        result['details']['interfaces_found'] = interfaces_list
-        
-        # 3. GigabitEthernet0/2 확인
-        target = "GigabitEthernet0/2"
-        if target in context.parsed_interfaces:
-            config = context.parsed_interfaces[target]
-            result['matched_text'] = f'NW-23 실행됨 | {target} 발견됨'
-            result['details']['target_config'] = {
-                'has_ip': config.get('has_ip_address', 'unknown'),
-                'has_desc': config.get('has_description', 'unknown'),
-                'is_shutdown': config.get('is_shutdown', 'unknown'),
-                'line_number': config.get('line_number', 'unknown')
-            }
-        else:
-            result['matched_text'] = f'NW-23 실행됨 | {target} 없음'
-            result['details']['available'] = interfaces_list
+    # 모든 데이터 값 확인
+    has_ip = config.get('has_ip_address', 'KEY_NOT_FOUND')
+    has_desc = config.get('has_description', 'KEY_NOT_FOUND')  
+    is_shutdown = config.get('is_shutdown', 'KEY_NOT_FOUND')
+    line_number = config.get('line_number', 'KEY_NOT_FOUND')
+    
+    # 원래 조건 계산
+    condition1 = not has_ip if has_ip is not 'KEY_NOT_FOUND' else 'UNKNOWN'
+    condition2 = not has_desc if has_desc is not 'KEY_NOT_FOUND' else 'UNKNOWN'  
+    condition3 = not is_shutdown if is_shutdown is not 'KEY_NOT_FOUND' else 'UNKNOWN'
+    
+    # 최종 취약점 판정
+    if (has_ip is not 'KEY_NOT_FOUND' and has_desc is not 'KEY_NOT_FOUND' and is_shutdown is not 'KEY_NOT_FOUND'):
+        is_vulnerable = not has_ip and not has_desc and not is_shutdown
+        final_result = "VULNERABLE" if is_vulnerable else "SAFE"
     else:
-        result['matched_text'] = 'NW-23 실행됨 | parsed_interfaces 없음'
-        result['details']['context_attrs'] = [attr for attr in dir(context) if not attr.startswith('_')]
+        final_result = "DATA_MISSING"
     
-    return [result]
+    # 상세 정보 메시지
+    data_summary = f"IP:{has_ip} DESC:{has_desc} SHUTDOWN:{is_shutdown}"
+    conditions_summary = f"(!IP):{condition1} (!DESC):{condition2} (!SHUTDOWN):{condition3}"
+    
+    matched_text = f"데이터 분석: {data_summary} | 조건: {conditions_summary} | 결과: {final_result}"
+    
+    return [{
+        'line': line_number if line_number != 'KEY_NOT_FOUND' else 999,
+        'matched_text': matched_text,
+        'details': {
+            'interface_name': target,
+            'raw_data': {
+                'has_ip_address': has_ip,
+                'has_description': has_desc,
+                'is_shutdown': is_shutdown,
+                'line_number': line_number
+            },
+            'conditions': {
+                'not_has_ip': condition1,
+                'not_has_desc': condition2,
+                'not_is_shutdown': condition3
+            },
+            'final_judgment': final_result,
+            'full_config': config  # 전체 설정 정보
+        }
+    }]
 
 
 # =========================== 헬퍼 함수들 ===========================
