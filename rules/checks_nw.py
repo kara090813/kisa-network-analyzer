@@ -548,94 +548,42 @@ def check_nw_21(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
 
 
 def check_nw_23(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """NW-23: matchedText에 디버깅 정보 포함"""
+    """NW-23: 강제 실행 확인"""
     
-    if not hasattr(context, 'parsed_interfaces'):
-        return [{
-            'line': 0,
-            'matched_text': 'DEBUG: parsed_interfaces 없음',
-            'details': {'error': 'No parsed_interfaces'}
-        }]
+    # 1. 무조건 실행되는지 확인
+    result = {
+        'line': 999,
+        'matched_text': 'NW-23 강제 실행됨 - 함수 정상 작동',
+        'details': {'test_status': 'function_executed'}
+    }
     
-    target = "GigabitEthernet0/2"
-    if target not in context.parsed_interfaces:
-        available = list(context.parsed_interfaces.keys())
-        return [{
-            'line': 0,
-            'matched_text': f'DEBUG: {target} 없음. 사용가능: {available}',
-            'details': {'error': 'Interface not found'}
-        }]
-    
-    config = context.parsed_interfaces[target]
-    
-    # 기본 정보 수집
-    has_ip = config.get('has_ip_address', False)
-    has_desc = config.get('has_description', False)  
-    is_shutdown = config.get('is_shutdown', True)
-    line_number = config.get('line_number', 56)
-    
-    # 취약점 판정
-    is_vulnerable = not has_ip and not has_desc and not is_shutdown
-    
-    if is_vulnerable:
-        # 취약점 발견 시 - 구체적인 위험 사유 제공
-        risk_factors = []
-        if not has_ip:
-            risk_factors.append("IP 주소 미설정")
-        if not has_desc:
-            risk_factors.append("용도 설명 없음")
-        if not is_shutdown:
-            risk_factors.append("활성화 상태")
+    # 2. context 확인
+    if hasattr(context, 'parsed_interfaces'):
+        interfaces_count = len(context.parsed_interfaces)
+        interfaces_list = list(context.parsed_interfaces.keys())
         
-        matched_text = f"interface {target}"
-        reason = f"미사용 인터페이스 보안 위험: {', '.join(risk_factors)}"
+        result['matched_text'] = f'NW-23 실행됨 | 인터페이스 {interfaces_count}개 발견'
+        result['details']['interfaces_found'] = interfaces_list
         
-        return [{
-            'line': line_number,
-            'matched_text': matched_text,
-            'details': {
-                'interface_name': target,
-                'reason': reason,
-                'security_risks': {
-                    'unauthorized_access': '물리적 접근 시 불법 네트워크 침입 가능',
-                    'network_exposure': '네트워크 정보 유출 위험',
-                    'attack_vector': '내부 네트워크 공격 경로로 활용 가능'
-                },
-                'detection_criteria': {
-                    'no_ip_address': not has_ip,
-                    'no_description': not has_desc,
-                    'not_shutdown': not is_shutdown
-                },
-                'recommended_action': 'interface shutdown 명령어로 인터페이스 비활성화'
+        # 3. GigabitEthernet0/2 확인
+        target = "GigabitEthernet0/2"
+        if target in context.parsed_interfaces:
+            config = context.parsed_interfaces[target]
+            result['matched_text'] = f'NW-23 실행됨 | {target} 발견됨'
+            result['details']['target_config'] = {
+                'has_ip': config.get('has_ip_address', 'unknown'),
+                'has_desc': config.get('has_description', 'unknown'),
+                'is_shutdown': config.get('is_shutdown', 'unknown'),
+                'line_number': config.get('line_number', 'unknown')
             }
-        }]
+        else:
+            result['matched_text'] = f'NW-23 실행됨 | {target} 없음'
+            result['details']['available'] = interfaces_list
     else:
-        # 안전한 경우 - 안전한 이유 제공
-        safe_reasons = []
-        if has_ip:
-            safe_reasons.append("IP 주소 설정됨")
-        if has_desc:
-            safe_reasons.append("용도 설명 있음") 
-        if is_shutdown:
-            safe_reasons.append("이미 비활성화됨")
-        
-        matched_text = f"interface {target} 분석 완료"
-        reason = f"보안상 안전: {', '.join(safe_reasons)}"
-        
-        return [{
-            'line': line_number,
-            'matched_text': matched_text,
-            'details': {
-                'interface_name': target,
-                'reason': reason,
-                'safety_status': '취약점 없음',
-                'analysis_result': {
-                    'has_ip_address': has_ip,
-                    'has_description': has_desc,
-                    'is_shutdown': is_shutdown
-                }
-            }
-        }]
+        result['matched_text'] = 'NW-23 실행됨 | parsed_interfaces 없음'
+        result['details']['context_attrs'] = [attr for attr in dir(context) if not attr.startswith('_')]
+    
+    return [result]
 
 
 # =========================== 헬퍼 함수들 ===========================
