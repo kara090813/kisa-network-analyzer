@@ -33,7 +33,7 @@ def check_nw_01(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
                     'vulnerability': 'basic_password_used',
                     'password_value': password_value,
                     'recommendation': 'Use enable secret with strong password',
-                    'severity_adjusted': 'high'
+                    'severity_adjusted': 'High'
                 }
             })
     
@@ -53,7 +53,7 @@ def check_nw_01(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
                         'password_type': 'user_password',
                         'vulnerability': 'basic_username_password',
                         'username': user['username'],
-                        'severity_adjusted': 'high'
+                        'severity_adjusted': 'High'
                     }
                 })
     
@@ -107,7 +107,7 @@ def check_nw_02(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
                 'has_enable_secret': has_enable_secret,
                 'weak_password_count': len(weak_passwords),
                 'recommendation': 'Configure password complexity policy or use secret passwords',
-                'severity_adjusted': 'medium' if has_secret_users else 'high'
+                'severity_adjusted': 'Medium' if has_secret_users else 'High'
             }
         })
     
@@ -120,7 +120,7 @@ def check_nw_02(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
                 'vulnerability': 'weak_password_complexity',
                 'username': user['username'],
                 'recommendation': 'Use username secret or enable service password-encryption',
-                'severity_adjusted': 'medium'
+                'severity_adjusted': 'Medium'
             }
         })
     
@@ -202,7 +202,7 @@ def check_nw_04(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
                 'total_users': total_unique_users,
                 'users': list(unique_users.keys()),
                 'recommendation': 'Assign different privilege levels based on user roles',
-                'severity_adjusted': 'medium'
+                'severity_adjusted': 'Medium'
             }
         })
     
@@ -217,7 +217,7 @@ def check_nw_04(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
                     'vulnerability': 'multiple_max_privilege_users',
                     'high_privilege_count': len(high_privilege_users),
                     'recommendation': 'Consider implementing role-based access control',
-                    'severity_adjusted': 'low'
+                    'severity_adjusted': 'Low'
                 }
             })
     
@@ -342,7 +342,7 @@ def check_nw_08(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
         
         # 정말 미사용이고 shutdown되지 않은 경우만
         if not is_configured and not is_shutdown and not is_reserved:
-            severity = 'high' if is_auxiliary else 'medium'
+            severity = 'High' if is_auxiliary else 'Medium'
             
             vulnerabilities.append({
                 'line': interface_config['line_number'],
@@ -808,7 +808,7 @@ def _is_critical_interface_enhanced(interface_name, device_type, interface_confi
 
 def _analyze_global_network_context(all_interfaces):
     """더 이상 사용하지 않음 - 스텁 함수"""
-    return {'total_interfaces': 0, 'used_interfaces': 0, 'usage_ratio': 0, 'network_size': 'medium'}
+    return {'total_interfaces': 0, 'used_interfaces': 0, 'usage_ratio': 0, 'network_size': 'Medium'}
 
 def _analyze_port_position(interface_name, network_context):
     """더 이상 사용하지 않음 - 스텁 함수"""
@@ -910,7 +910,7 @@ def check_nw_33(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
                     'interface_type': 'external',
                     'issues': issues,
                     'recommendation': 'Disable ICMP unreachables and redirects on external interfaces',
-                    'severity_adjusted': 'medium'
+                    'severity_adjusted': 'Medium'
                 }
             })
     
@@ -966,7 +966,7 @@ def check_nw_38(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
                 'affected_ports': access_ports_without_security[:5],  # 최대 5개만
                 'total_affected': len(access_ports_without_security),
                 'recommendation': 'Enable port-security on access ports to prevent MAC flooding',
-                'severity_adjusted': 'medium'
+                'severity_adjusted': 'Medium'
             }
         })
     
@@ -979,7 +979,7 @@ def check_nw_38(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
                 'vulnerability': 'no_dhcp_snooping',
                 'device_type': device_type,
                 'recommendation': 'Enable DHCP snooping on switches',
-                'severity_adjusted': 'low'
+                'severity_adjusted': 'Low'
             }
         })
     
@@ -1007,19 +1007,19 @@ def check_nw_40(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
             if not config['has_authentication']:
                 # BGP는 외부 연결시 필수
                 if protocol == 'bgp' and has_external_connection:
-                    severity = 'high'
+                    severity = 'High'
                 # OSPF/EIGRP는 권장
                 elif protocol in ['ospf', 'eigrp']:
-                    severity = 'medium'
+                    severity = 'Medium'
                 # RIP는 낮음
                 else:
-                    severity = 'low'
+                    severity = 'Low'
                 
                 # 내부 전용 네트워크는 심각도 낮춤
                 if not has_external_connection:
-                    severity = 'low' if severity == 'medium' else 'info'
+                    severity = 'Low' if severity == 'Medium' else 'info'
                 
-                if severity in ['high', 'medium', 'low']:
+                if severity in ['High', 'Medium', 'Low']:
                     vulnerabilities.append({
                         'line': config['line_number'],
                         'matched_text': config['config_start'],
@@ -1069,7 +1069,7 @@ def check_nw_41(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
             'details': {
                 'vulnerability': 'no_backup_configuration',
                 'recommendation': 'Configure automatic backup using archive or kron',
-                'severity_adjusted': 'high'
+                'severity_adjusted': 'High'
             }
         })
     # 수동 백업만 있는 경우
@@ -1081,7 +1081,7 @@ def check_nw_41(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
                 'vulnerability': 'no_automatic_backup',
                 'backup_features': backup_features,
                 'recommendation': 'Configure scheduled automatic backups',
-                'severity_adjusted': 'medium'
+                'severity_adjusted': 'Medium'
             }
         })
     
