@@ -11,7 +11,7 @@ from .kisa_rules import ConfigContext
 
 
 def check_nw_01(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """NW-01: 기본 패스워드 설정 - 완전한 논리 기반 분석"""
+    """NW-01: 기본 패스워드 설정 - 개선된 논리 기반 분석"""
     vulnerabilities = []
     
     # 기본 패스워드 패턴들 (확장)
@@ -21,7 +21,7 @@ def check_nw_01(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
         'switch', 'router', 'manager', 'security', 'public', 'private'
     ]
     
-    # Enable 패스워드 검사
+    # Enable 패스워드 검사 - secret은 제외
     if context.global_settings.get('enable_password_type') == 'password':
         password_value = context.global_settings.get('enable_password_value', '')
         if any(basic_pwd in password_value.lower() for basic_pwd in basic_passwords):
@@ -32,12 +32,17 @@ def check_nw_01(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
                     'password_type': 'enable_password',
                     'vulnerability': 'basic_password_used',
                     'password_value': password_value,
-                    'recommendation': 'Use enable secret with strong password'
+                    'recommendation': 'Use enable secret with strong password',
+                    'severity_adjusted': 'high'
                 }
             })
     
-    # 사용자 패스워드 검사
+    # 사용자 패스워드 검사 - secret 타입은 제외
     for user in context.parsed_users:
+        # secret 타입은 이미 안전함
+        if user.get('password_type') == 'secret':
+            continue
+            
         if user['has_password'] and not user['password_encrypted']:
             # 기본 사용자명과 패스워드 체크
             if user['username'].lower() in basic_passwords:
@@ -47,7 +52,8 @@ def check_nw_01(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
                     'details': {
                         'password_type': 'user_password',
                         'vulnerability': 'basic_username_password',
-                        'username': user['username']
+                        'username': user['username'],
+                        'severity_adjusted': 'high'
                     }
                 })
     
@@ -55,38 +61,68 @@ def check_nw_01(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
 
 
 def check_nw_02(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """NW-02: 패스워드 복잡성 설정 - 논리 기반 분석"""
+    """NW-02: 패스워드 복잡성 설정 - 개선된 논리 기반 분석"""
     vulnerabilities = []
     
+    # secret 타입 사용자 확인
+    has_secret_users = any(
+        user.get('password_type') == 'secret' 
+        for user in context.parsed_users
+    )
+    
+    # enable secret 사용 확인
+    has_enable_secret = context.global_settings.get('enable_password_type') == 'secret'
+    
+    # 패스워드 암호화 서비스 확인
+    password_encryption_enabled = context.parsed_services.get('password-encryption', False)
+    
     # 패스워드 최소 길이 설정 확인
-    has_min_length = 'passwords min-length' in context.full_config
-    has_complexity_policy = any([
-        'username-password combination high' in context.full_config,
-        'password-policy' in context.full_config
+    has_min_length = any([
+        'passwords min-length' in context.full_config,
+        'password-policy' in context.full_config,
+        'security passwords min-length' in context.full_config
     ])
     
-    if not has_min_length and not has_complexity_policy:
+    # 복잡성 정책이 필요한지 판단
+    needs_complexity_policy = False
+    weak_passwords = []
+    
+    for user in context.parsed_users:
+        # secret 타입은 제외 (이미 복잡성 보장)
+        if user.get('password_type') == 'secret':
+            continue
+            
+        if user['has_password'] and not user['password_encrypted']:
+            needs_complexity_policy = True
+            weak_passwords.append(user)
+    
+    # 정책이 없고 약한 패스워드가 있는 경우만 보고
+    if needs_complexity_policy and not has_min_length and not password_encryption_enabled:
         vulnerabilities.append({
             'line': 0,
-            'matched_text': '패스워드 복잡성 정책 설정 누락',
+            'matched_text': '패스워드 복잡성 정책 설정 필요',
             'details': {
                 'vulnerability': 'no_password_complexity_policy',
-                'recommendation': 'Configure password complexity policy'
+                'has_secret_users': has_secret_users,
+                'has_enable_secret': has_enable_secret,
+                'weak_password_count': len(weak_passwords),
+                'recommendation': 'Configure password complexity policy or use secret passwords',
+                'severity_adjusted': 'medium' if has_secret_users else 'high'
             }
         })
     
-    # 약한 패스워드 패턴 검사
-    for user in context.parsed_users:
-        if user['has_password'] and not user['password_encrypted']:
-            vulnerabilities.append({
-                'line': user['line_number'],
-                'matched_text': f"username {user['username']} password (weak complexity)",
-                'details': {
-                    'vulnerability': 'weak_password_complexity',
-                    'username': user['username'],
-                    'recommendation': 'Use complex password with minimum 8 characters'
-                }
-            })
+    # 개별 약한 패스워드 검사
+    for user in weak_passwords:
+        vulnerabilities.append({
+            'line': user['line_number'],
+            'matched_text': f"username {user['username']} password (weak complexity)",
+            'details': {
+                'vulnerability': 'weak_password_complexity',
+                'username': user['username'],
+                'recommendation': 'Use username secret or enable service password-encryption',
+                'severity_adjusted': 'medium'
+            }
+        })
     
     return vulnerabilities
 
@@ -138,41 +174,50 @@ def check_nw_03(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
 
 
 def check_nw_04(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """NW-04: 사용자·명령어별 권한 수준 설정 - 완전한 논리 기반 분석"""
+    """NW-04: 사용자·명령어별 권한 수준 설정 - 중복 제거 및 개선"""
     vulnerabilities = []
     
-    # 모든 사용자가 최고 권한(privilege 15)을 가지는지 확인
-    high_privilege_users = []
-    total_users = len(context.parsed_users)
-    
+    # 실제 유니크한 사용자만 계산
+    unique_users = {}
     for user in context.parsed_users:
+        username = user.get('username')
+        if username:
+            unique_users[username] = user
+    
+    high_privilege_users = []
+    total_unique_users = len(unique_users)
+    
+    for username, user in unique_users.items():
         if user.get('privilege_level', 1) == 15:
             high_privilege_users.append(user)
     
-    # 모든 사용자가 최고 권한을 가지는 경우
-    if len(high_privilege_users) == total_users and total_users > 1:
+    # 2명 이상의 사용자가 있고 모두 최고 권한인 경우만 보고
+    if total_unique_users > 1 and len(high_privilege_users) == total_unique_users:
         vulnerabilities.append({
             'line': 0,
-            'matched_text': f"All {total_users} users have maximum privilege level 15",
+            'matched_text': f"All {total_unique_users} users have maximum privilege level 15",
             'details': {
                 'vulnerability': 'all_users_max_privilege',
                 'high_privilege_count': len(high_privilege_users),
-                'total_users': total_users,
-                'recommendation': 'Assign different privilege levels based on user roles'
+                'total_users': total_unique_users,
+                'users': list(unique_users.keys()),
+                'recommendation': 'Assign different privilege levels based on user roles',
+                'severity_adjusted': 'medium'
             }
         })
     
-    # 개별 사용자별 높은 권한 경고
-    for user in high_privilege_users:
-        if len(high_privilege_users) > 1:  # 여러 사용자가 최고 권한을 가지는 경우만
+    # 개별 사용자 경고는 중복 제거
+    # 3명 이상일 때만 개별 경고
+    elif len(high_privilege_users) >= 3:
+        for user in high_privilege_users[:1]:  # 대표 1개만
             vulnerabilities.append({
                 'line': user['line_number'],
-                'matched_text': f"username {user['username']} privilege 15",
+                'matched_text': f"{len(high_privilege_users)} users with privilege 15",
                 'details': {
-                    'vulnerability': 'excessive_user_privilege',
-                    'username': user['username'],
-                    'privilege_level': user['privilege_level'],
-                    'recommendation': 'Consider lower privilege level for this user'
+                    'vulnerability': 'multiple_max_privilege_users',
+                    'high_privilege_count': len(high_privilege_users),
+                    'recommendation': 'Consider implementing role-based access control',
+                    'severity_adjusted': 'low'
                 }
             })
     
@@ -260,45 +305,55 @@ def check_nw_06(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
 
 
 def check_nw_08(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """NW-08: 불필요한 보조 입출력 포트 사용 금지 - 완전한 논리 기반 분석"""
+    """NW-08: 불필요한 보조 입출력 포트 사용 금지 - 개선된 분석"""
     vulnerabilities = []
     
     for interface_name, interface_config in context.parsed_interfaces.items():
-        # 사용 중인지 판단
-        is_used = (
-            interface_config['has_ip_address'] or
-            interface_config['has_description'] or
-            interface_config['has_vlan'] or
-            interface_config['is_loopback'] or
-            interface_config['is_management'] or
-            interface_config['has_switchport']
-        )
+        # 물리적 인터페이스만 체크
+        is_physical = interface_config['port_type'] in [
+            'FastEthernet', 'GigabitEthernet', 'TenGigabitEthernet', 'Serial'
+        ]
         
-        is_active = not interface_config['is_shutdown']
+        if not is_physical:
+            continue
         
-        # 중요 인터페이스 예외 처리
-        is_critical = _is_critical_interface_nw(interface_name, context.device_type)
+        # 보조 포트 여부 확인
+        is_auxiliary = any(aux in interface_name.lower() for aux in ['aux', 'console'])
         
-        # 물리적 인터페이스만 체크 (VLAN, Loopback 제외)
-        is_physical = interface_config['port_type'] in ['FastEthernet', 'GigabitEthernet', 'TenGigabitEthernet', 'Serial']
+        # 사용 여부 더 정확히 판단
+        is_configured = any([
+            interface_config['has_ip_address'],
+            interface_config['has_description'],
+            interface_config['has_vlan'],
+            interface_config.get('has_nat', False),
+            interface_config.get('has_acl', False),
+            interface_config.get('is_trunk', False),
+            'channel-group' in str(interface_config.get('config_lines', [])),
+            'standby' in str(interface_config.get('config_lines', [])),
+        ])
         
-        # 보조 포트 판별 (AUX, Console 등)
-        is_auxiliary_port = any(aux_type in interface_name.lower() for aux_type in ['aux', 'console', 'mgmt'])
+        is_shutdown = interface_config['is_shutdown']
         
-        if not is_used and is_active and not is_critical and (is_physical or is_auxiliary_port):
+        # 미래 사용 예정 확인 (description에 planned, future, reserved 등)
+        description = interface_config.get('description', '').lower()
+        is_reserved = any(word in description for word in [
+            'planned', 'future', 'reserved', 'spare', 'backup', 'standby'
+        ])
+        
+        # 정말 미사용이고 shutdown되지 않은 경우만
+        if not is_configured and not is_shutdown and not is_reserved:
+            severity = 'high' if is_auxiliary else 'medium'
+            
             vulnerabilities.append({
                 'line': interface_config['line_number'],
                 'matched_text': f"interface {interface_name}",
                 'details': {
                     'interface_name': interface_name,
                     'port_type': interface_config['port_type'],
-                    'reason': 'Unused auxiliary or physical interface not shutdown',
-                    'is_auxiliary': is_auxiliary_port,
-                    'is_physical': is_physical,
-                    'has_ip': interface_config['has_ip_address'],
-                    'has_description': interface_config['has_description'],
-                    'is_shutdown': interface_config['is_shutdown'],
-                    'recommendation': 'Shutdown unused interfaces to prevent unauthorized access'
+                    'reason': 'Unused interface not shutdown',
+                    'is_auxiliary': is_auxiliary,
+                    'recommendation': 'Shutdown unused interfaces or add description for future use',
+                    'severity_adjusted': severity
                 }
             })
     
@@ -501,46 +556,75 @@ def check_nw_19(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
 
 
 def check_nw_21(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """NW-21: Spoofing 방지 필터링 적용 - 논리 기반 분석"""
+    """NW-21: Spoofing 방지 필터링 - 기존 ACL 인식 개선"""
     vulnerabilities = []
     
-    # 스푸핑 방지를 위한 주요 네트워크 차단 확인
-    spoofing_blocks = {
-        'loopback': r'access-list\s+\d+\s+deny\s+ip\s+127\.0\.0\.0\s+0\.255\.255\.255',
-        'private_10': r'access-list\s+\d+\s+deny\s+ip\s+10\.0\.0\.0\s+0\.255\.255\.255',
-        'private_172': r'access-list\s+\d+\s+deny\s+ip\s+172\.16\.0\.0\s+0\.15\.255\.255',
-        'private_192': r'access-list\s+\d+\s+deny\s+ip\s+192\.168\.0\.0\s+0\.0\.255\.255',
-        'broadcast': r'access-list\s+\d+\s+deny\s+ip\s+\d+\.\d+\.\d+\.255',
-        'multicast': r'access-list\s+\d+\s+deny\s+ip\s+22[4-9]\.',
+    # ACL 내용 분석
+    config_lines = context.full_config.split('\n')
+    acl_protections = {
+        'private_ranges': False,
+        'loopback': False,
+        'broadcast': False,
+        'multicast': False,
+        'bogons': False
     }
     
-    # Juniper 방화벽 필터 확인
-    juniper_filters = [
-        'firewall family inet filter',
-        'policy-options prefix-list',
-        'term anti-spoofing'
-    ]
+    # 모든 ACL 검사
+    for i, line in enumerate(config_lines):
+        line_lower = line.lower().strip()
+        
+        # Private IP 차단 확인
+        if 'deny' in line_lower:
+            if any(ip in line for ip in ['10.0.0.0', '172.16.0.0', '192.168.0.0']):
+                acl_protections['private_ranges'] = True
+            if '127.0.0.0' in line or '127.0.0.1' in line:
+                acl_protections['loopback'] = True
+            if re.search(r'22[4-9]\.|23[0-9]\.', line):
+                acl_protections['multicast'] = True
+            if '.255' in line and 'deny' in line_lower:
+                acl_protections['broadcast'] = True
+            if any(ip in line for ip in ['0.0.0.0/8', '169.254.0.0']):
+                acl_protections['bogons'] = True
     
-    missing_protections = []
+    # 인터페이스에 ACL 적용 확인
+    applied_acls = []
+    for interface_name, interface_config in context.parsed_interfaces.items():
+        config_lines = interface_config.get('config_lines', [])
+        for line in config_lines:
+            if 'access-group' in line:
+                applied_acls.append(interface_name)
     
-    # Cisco ACL 기반 스푸핑 보호 확인
-    for protection_type, pattern in spoofing_blocks.items():
-        if not any(re.search(pattern, context.full_config, re.IGNORECASE) for pattern in [pattern]):
-            missing_protections.append(protection_type)
+    # 보호 수준 평가
+    protection_count = sum(acl_protections.values())
     
-    # Juniper 필터 확인
-    has_juniper_protection = any(filter_type in context.full_config for filter_type in juniper_filters)
+    # 기본적인 보호가 있는지 확인
+    has_basic_protection = (
+        acl_protections['private_ranges'] or 
+        len(applied_acls) > 0
+    )
     
-    # ACL이 전혀 없거나 기본 스푸핑 보호가 부족한 경우
-    if len(missing_protections) >= 3 and not has_juniper_protection:
+    # 외부 인터페이스 확인
+    external_interfaces = []
+    for name, config in context.parsed_interfaces.items():
+        desc = config.get('description', '').lower()
+        if any(word in desc for word in ['isp', 'internet', 'wan', 'external']):
+            external_interfaces.append(name)
+    
+    # 외부 인터페이스가 있는데 보호가 부족한 경우만 보고
+    if external_interfaces and protection_count < 3:
+        missing = [k for k, v in acl_protections.items() if not v]
+        
         vulnerabilities.append({
             'line': 0,
-            'matched_text': 'Insufficient anti-spoofing protection',
+            'matched_text': 'Spoofing protection could be enhanced',
             'details': {
-                'vulnerability': 'inadequate_spoofing_protection',
-                'missing_protections': missing_protections,
-                'has_juniper_protection': has_juniper_protection,
-                'recommendation': 'Configure ACLs to block spoofed source addresses (loopback, private ranges, broadcast)'
+                'vulnerability': 'incomplete_spoofing_protection',
+                'protection_level': protection_count,
+                'missing_protections': missing,
+                'external_interfaces': external_interfaces,
+                'applied_acls': applied_acls,
+                'recommendation': 'Consider adding ACLs for: ' + ', '.join(missing),
+                'severity_adjusted': 'low' if protection_count >= 2 else 'medium'
             }
         })
     
@@ -777,31 +861,45 @@ def _is_critical_interface_nw23(interface_name: str, device_type: str) -> bool:
     return False
 
 def check_nw_33(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """NW-33: ICMP unreachable, Redirect 차단 - 논리 기반 분석"""
+    """NW-33: ICMP unreachable, Redirect 차단 - 선택적 적용"""
     vulnerabilities = []
     
-    # 각 인터페이스별로 ICMP unreachables와 redirects 설정 확인
+    # 외부 연결 인터페이스만 체크
     for interface_name, interface_config in context.parsed_interfaces.items():
-        issues = []
-        
-        # 물리적 인터페이스만 체크 (Loopback 제외)
-        if interface_config['is_loopback']:
+        # 논리적 인터페이스 제외
+        if interface_config['is_loopback'] or interface_config.get('is_tunnel'):
             continue
-            
-        # 인터페이스 설정에서 ICMP 설정 확인
-        interface_lines = interface_config.get('config_lines', [])
-        has_no_unreachables = any('no ip unreachables' in line for line in interface_lines)
-        has_no_redirects = any('no ip redirects' in line for line in interface_lines)
         
-        # 글로벌 설정에서도 확인
-        global_no_unreachables = 'no ip unreachables' in context.full_config
-        global_no_redirects = 'no ip redirects' in context.full_config
+        # 외부 연결 여부 확인
+        is_external = False
+        description = interface_config.get('description', '').lower()
         
-        if not (has_no_unreachables or global_no_unreachables):
-            issues.append('unreachables_not_disabled')
-            
-        if not (has_no_redirects or global_no_redirects):
-            issues.append('redirects_not_disabled')
+        # 외부 연결 키워드
+        if any(word in description for word in ['isp', 'internet', 'wan', 'external', 'outside']):
+            is_external = True
+        
+        # NAT outside 인터페이스
+        config_lines = interface_config.get('config_lines', [])
+        if any('nat outside' in line for line in config_lines):
+            is_external = True
+        
+        # 공인 IP 대역 확인
+        ip_address = interface_config.get('ip_address', '')
+        if ip_address and not _is_private_ip(ip_address):
+            is_external = True
+        
+        if not is_external:
+            continue
+        
+        # ICMP 설정 확인
+        has_no_unreachables = any('no ip unreachables' in line for line in config_lines)
+        has_no_redirects = any('no ip redirects' in line for line in config_lines)
+        
+        issues = []
+        if not has_no_unreachables:
+            issues.append('unreachables_enabled')
+        if not has_no_redirects:
+            issues.append('redirects_enabled')
         
         if issues:
             vulnerabilities.append({
@@ -809,10 +907,10 @@ def check_nw_33(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
                 'matched_text': f"interface {interface_name}",
                 'details': {
                     'interface_name': interface_name,
+                    'interface_type': 'external',
                     'issues': issues,
-                    'has_no_unreachables': has_no_unreachables or global_no_unreachables,
-                    'has_no_redirects': has_no_redirects or global_no_redirects,
-                    'recommendation': 'Configure no ip unreachables and no ip redirects on each interface'
+                    'recommendation': 'Disable ICMP unreachables and redirects on external interfaces',
+                    'severity_adjusted': 'medium'
                 }
             })
     
@@ -820,46 +918,68 @@ def check_nw_33(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
 
 
 def check_nw_38(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """NW-38: 스위치, 허브 보안 강화 - 논리 기반 분석"""
+    """NW-38: 스위치 보안 - 장비 타입별 차별화"""
     vulnerabilities = []
     
-    # 스위치 포트 보안 설정 확인
+    # 장비 타입 확인 - 스위치 기능이 있는지 확인
+    device_type = context.device_type.lower()
+    is_switch = any([
+        'switch' in device_type,
+        'catalyst' in device_type,
+        'nexus' in device_type
+    ])
+    
+    # 스위칭 기능 확인
+    has_switching = any(
+        interface.get('has_switchport', False) 
+        for interface in context.parsed_interfaces.values()
+    )
+    
+    # 라우터인데 스위칭 기능이 없으면 체크 안함
+    if not is_switch and not has_switching:
+        return vulnerabilities
+    
+    # 스위치포트가 있는 경우만 포트 보안 체크
+    access_ports_without_security = []
+    
     for interface_name, interface_config in context.parsed_interfaces.items():
-        # 스위치포트 모드가 access인 인터페이스만 체크
         if not interface_config.get('has_switchport', False):
             continue
-            
-        interface_lines = interface_config.get('config_lines', [])
         
-        # switchport mode access 확인
-        is_access_mode = any('switchport mode access' in line for line in interface_lines)
+        config_lines = interface_config.get('config_lines', [])
+        is_access_mode = any('switchport mode access' in line for line in config_lines)
+        has_port_security = any('switchport port-security' in line for line in config_lines)
         
-        # port-security 설정 확인
-        has_port_security = any('switchport port-security' in line for line in interface_lines)
+        # 음성 VLAN 등 특수 용도 확인
+        has_voice_vlan = any('switchport voice vlan' in line for line in config_lines)
         
-        if is_access_mode and not has_port_security:
-            vulnerabilities.append({
-                'line': interface_config['line_number'],
-                'matched_text': f"interface {interface_name}",
-                'details': {
-                    'interface_name': interface_name,
-                    'vulnerability': 'no_port_security',
-                    'port_mode': 'access',
-                    'has_port_security': has_port_security,
-                    'recommendation': 'Configure switchport port-security to prevent MAC flooding attacks'
-                }
-            })
+        if is_access_mode and not has_port_security and not has_voice_vlan:
+            access_ports_without_security.append(interface_name)
     
-    # DHCP snooping 확인
-    dhcp_snooping_enabled = 'ip dhcp snooping' in context.full_config
-    
-    if not dhcp_snooping_enabled:
+    # 일정 비율 이상의 포트가 보안 설정이 없을 때만 보고
+    if len(access_ports_without_security) > 3:
         vulnerabilities.append({
             'line': 0,
-            'matched_text': 'Missing DHCP snooping configuration',
+            'matched_text': f'{len(access_ports_without_security)} access ports without port-security',
+            'details': {
+                'vulnerability': 'multiple_ports_no_security',
+                'affected_ports': access_ports_without_security[:5],  # 최대 5개만
+                'total_affected': len(access_ports_without_security),
+                'recommendation': 'Enable port-security on access ports to prevent MAC flooding',
+                'severity_adjusted': 'medium'
+            }
+        })
+    
+    # DHCP snooping은 스위치에서만 체크
+    if is_switch and not any('dhcp snooping' in context.full_config for _ in [1]):
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': 'DHCP snooping not configured',
             'details': {
                 'vulnerability': 'no_dhcp_snooping',
-                'recommendation': 'Enable DHCP snooping to prevent DHCP spoofing attacks'
+                'device_type': device_type,
+                'recommendation': 'Enable DHCP snooping on switches',
+                'severity_adjusted': 'low'
             }
         })
     
@@ -867,124 +987,106 @@ def check_nw_38(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
 
 
 def check_nw_40(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """NW-40: 동적 라우팅 프로토콜 인증 여부 - 논리 기반 분석"""
+    """NW-40: 라우팅 프로토콜 인증 - 네트워크 환경 고려"""
     vulnerabilities = []
     
-    # 라우팅 프로토콜 설정 확인
-    routing_protocols = {
-        'ospf': [],
-        'rip': [],
-        'eigrp': [],
-        'bgp': []
-    }
+    # 외부 연결 확인
+    has_external_connection = False
+    for interface in context.parsed_interfaces.values():
+        desc = interface.get('description', '').lower()
+        if any(word in desc for word in ['isp', 'internet', 'wan', 'external']):
+            has_external_connection = True
+            break
     
-    lines = context.config_lines
-    current_protocol = None
+    # 라우팅 프로토콜 분석
+    routing_configs = _analyze_routing_protocols(context)
     
-    for i, line in enumerate(lines):
-        line_clean = line.strip()
-        
-        # 라우팅 프로토콜 시작 확인
-        if line_clean.startswith('router '):
-            protocol_parts = line_clean.split()
-            if len(protocol_parts) >= 2:
-                protocol_type = protocol_parts[1].lower()
-                if protocol_type in routing_protocols:
-                    current_protocol = protocol_type
-                    routing_protocols[protocol_type].append({
-                        'line_number': i + 1,
-                        'config_start': line_clean,
-                        'has_authentication': False,
-                        'authentication_type': None
-                    })
-        
-        # 인증 설정 확인
-        elif current_protocol and line_clean and not line_clean.startswith('!'):
-            if routing_protocols[current_protocol]:
-                current_config = routing_protocols[current_protocol][-1]
-                
-                if any(auth_keyword in line_clean for auth_keyword in [
-                    'authentication message-digest',
-                    'authentication-key',
-                    'message-digest-key',
-                    'area authentication'
-                ]):
-                    current_config['has_authentication'] = True
-                    current_config['authentication_type'] = line_clean
-        
-        # 새로운 섹션 시작시 current_protocol 리셋
-        elif not line_clean.startswith(' ') and line_clean and not line_clean.startswith('!'):
-            current_protocol = None
-    
-    # 인증이 설정되지 않은 라우팅 프로토콜 확인
-    for protocol, configs in routing_protocols.items():
+    for protocol, configs in routing_configs.items():
         for config in configs:
+            # 인증이 없는 경우
             if not config['has_authentication']:
-                vulnerabilities.append({
-                    'line': config['line_number'],
-                    'matched_text': config['config_start'],
-                    'details': {
-                        'protocol': protocol,
-                        'vulnerability': 'no_routing_authentication',
-                        'has_authentication': config['has_authentication'],
-                        'recommendation': f'Configure authentication for {protocol.upper()} routing protocol'
-                    }
-                })
+                # BGP는 외부 연결시 필수
+                if protocol == 'bgp' and has_external_connection:
+                    severity = 'high'
+                # OSPF/EIGRP는 권장
+                elif protocol in ['ospf', 'eigrp']:
+                    severity = 'medium'
+                # RIP는 낮음
+                else:
+                    severity = 'low'
+                
+                # 내부 전용 네트워크는 심각도 낮춤
+                if not has_external_connection:
+                    severity = 'low' if severity == 'medium' else 'info'
+                
+                if severity in ['high', 'medium', 'low']:
+                    vulnerabilities.append({
+                        'line': config['line_number'],
+                        'matched_text': config['config_start'],
+                        'details': {
+                            'protocol': protocol.upper(),
+                            'vulnerability': 'no_routing_authentication',
+                            'network_type': 'external' if has_external_connection else 'internal',
+                            'recommendation': f'Configure MD5 authentication for {protocol.upper()}',
+                            'severity_adjusted': severity
+                        }
+                    })
     
     return vulnerabilities
 
 
 def check_nw_41(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """NW-41: 네트워크 장비 백업 관리 - 논리 기반 분석"""
+    """NW-41: 백업 관리 - 실질적인 백업 설정 확인"""
     vulnerabilities = []
     
-    # 백업 관련 설정 확인
-    backup_indicators = [
-        'archive',
-        'backup',
-        'copy running-config',
-        'write memory',
-        'tftp',
-        'ftp',
-        'scp'
-    ]
+    # 백업 관련 상세 설정 확인
+    backup_features = {
+        'archive': 'archive' in context.full_config,
+        'kron': 'kron' in context.full_config,
+        'eem': 'event manager applet' in context.full_config,
+        'backup_commands': any(cmd in context.full_config for cmd in [
+            'copy running-config', 'write memory', 'wr mem'
+        ])
+    }
     
-    has_backup_config = any(
-        indicator in context.full_config.lower() 
-        for indicator in backup_indicators
-    )
-    
-    # 자동 백업 설정 확인
-    has_auto_backup = any([
-        'archive' in context.full_config,
-        'kron' in context.full_config,  # Cisco 스케줄러
-        'event manager' in context.full_config
+    # 외부 백업 서버 설정 확인
+    external_backup = any(protocol in context.full_config.lower() for protocol in [
+        'tftp://', 'ftp://', 'scp://', 'sftp://', 'https://'
     ])
     
-    if not has_backup_config:
+    # 자동 백업 여부
+    has_auto_backup = any([
+        backup_features['archive'],
+        backup_features['kron'],
+        backup_features['eem']
+    ])
+    
+    # 백업 설정이 전혀 없는 경우
+    if not any(backup_features.values()) and not external_backup:
         vulnerabilities.append({
             'line': 0,
             'matched_text': 'No backup configuration found',
             'details': {
                 'vulnerability': 'no_backup_configuration',
-                'has_backup_config': has_backup_config,
-                'has_auto_backup': has_auto_backup,
-                'recommendation': 'Configure automatic backup procedures for device configuration'
+                'recommendation': 'Configure automatic backup using archive or kron',
+                'severity_adjusted': 'high'
             }
         })
-    elif not has_auto_backup:
+    # 수동 백업만 있는 경우
+    elif not has_auto_backup and backup_features['backup_commands']:
         vulnerabilities.append({
             'line': 0,
-            'matched_text': 'Manual backup only',
+            'matched_text': 'Only manual backup configured',
             'details': {
                 'vulnerability': 'no_automatic_backup',
-                'has_backup_config': has_backup_config,
-                'has_auto_backup': has_auto_backup,
-                'recommendation': 'Configure automatic backup scheduling to ensure regular backups'
+                'backup_features': backup_features,
+                'recommendation': 'Configure scheduled automatic backups',
+                'severity_adjusted': 'medium'
             }
         })
     
     return vulnerabilities
+
 
 
 def check_nw_42(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
@@ -1055,3 +1157,173 @@ def check_nw_42(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
         })
     
     return vulnerabilities
+
+# Helper Functions
+
+def _is_interface_configured(config_block: str) -> bool:
+    """인터페이스가 실제로 설정되어 있는지 확인"""
+    indicators = [
+        r'ip address \d+\.\d+\.\d+\.\d+',
+        r'description\s+\S+',
+        r'switchport',
+        r'encapsulation',
+        r'channel-group',
+        r'standby',
+        r'hsrp',
+        r'vrrp',
+        r'nat',
+        r'access-group',
+        r'service-policy',
+        r'crypto map'
+    ]
+    
+    for indicator in indicators:
+        if re.search(indicator, config_block, re.IGNORECASE):
+            return True
+    return False
+
+
+def _is_critical_interface_enhanced(interface_name: str, config_block: str, device_type: str) -> bool:
+    """중요 인터페이스 판별 - 향상된 버전"""
+    name_lower = interface_name.lower()
+    
+    # 항상 중요한 인터페이스
+    if any(word in name_lower for word in ['management', 'mgmt', 'console']):
+        return True
+    
+    # 첫 번째 포트들 (주로 업링크)
+    if re.search(r'0/0(?:\.|$)', interface_name):
+        return True
+    
+    # 설명에서 중요 키워드 확인
+    if 'description' in config_block:
+        desc_match = re.search(r'description\s+(.+)', config_block, re.IGNORECASE)
+        if desc_match:
+            desc = desc_match.group(1).lower()
+            critical_keywords = [
+                'uplink', 'trunk', 'core', 'wan', 'internet', 'isp',
+                'backbone', 'primary', 'main', 'critical'
+            ]
+            if any(keyword in desc for keyword in critical_keywords):
+                return True
+    
+    # 서브인터페이스가 있으면 중요
+    base_name = interface_name.split('.')[0]
+    if '.' in interface_name or f'{base_name}.' in config_block:
+        return True
+    
+    # 특별한 설정이 있으면 중요
+    if any(feature in config_block for feature in [
+        'hsrp', 'vrrp', 'glbp', 'nat outside', 'crypto map'
+    ]):
+        return True
+    
+    return False
+
+
+def _check_future_use_likelihood(interface_name: str, config_block: str, usage_ratio: float) -> bool:
+    """미래 사용 가능성 판단"""
+    # 전체 사용률이 낮으면 미래 사용 가능성 높음
+    if usage_ratio < 0.3:
+        return True
+    
+    # 연속된 포트 번호
+    port_match = re.search(r'(\d+)/(\d+)$', interface_name)
+    if port_match:
+        slot, port = port_match.groups()
+        port_num = int(port)
+        
+        # 낮은 번호의 포트는 보통 사용 예정
+        if port_num <= 3:
+            return True
+        
+        # 짝수/홀수 패턴 (보통 페어로 사용)
+        if port_num % 2 == 0:
+            return True
+    
+    return False
+
+
+def _find_line_number(config_text: str, interface_name: str) -> int:
+    """설정에서 라인 번호 찾기"""
+    pattern = f'interface\\s+{re.escape(interface_name)}'
+    match = re.search(pattern, config_text, re.IGNORECASE)
+    if match:
+        before_text = config_text[:match.start()]
+        return before_text.count('\n') + 1
+    return 0
+
+
+def _is_private_ip(ip_address: str) -> bool:
+    """사설 IP 대역 확인"""
+    private_ranges = [
+        (r'^10\.', ),
+        (r'^172\.(1[6-9]|2[0-9]|3[0-1])\.', ),
+        (r'^192\.168\.', ),
+    ]
+    
+    for pattern in private_ranges:
+        if re.match(pattern[0], ip_address):
+            return True
+    return False
+
+
+def _analyze_routing_protocols(context: ConfigContext) -> Dict[str, List[Dict]]:
+    """라우팅 프로토콜 설정 분석"""
+    routing_protocols = {
+        'ospf': [],
+        'eigrp': [],
+        'bgp': [],
+        'rip': []
+    }
+    
+    lines = context.config_lines
+    current_protocol = None
+    current_config = None
+    
+    for i, line in enumerate(lines):
+        line_clean = line.strip()
+        
+        # 라우팅 프로토콜 시작
+        if line_clean.startswith('router '):
+            parts = line_clean.split()
+            if len(parts) >= 2:
+                protocol = parts[1].lower()
+                if protocol in routing_protocols:
+                    current_protocol = protocol
+                    current_config = {
+                        'line_number': i + 1,
+                        'config_start': line_clean,
+                        'has_authentication': False,
+                        'auth_type': None,
+                        'config_lines': [line_clean]
+                    }
+                    routing_protocols[protocol].append(current_config)
+        
+        # 프로토콜 설정 내부
+        elif current_protocol and current_config:
+            if line_clean and not line_clean.startswith('!'):
+                current_config['config_lines'].append(line_clean)
+                
+                # 인증 키워드 확인
+                auth_keywords = [
+                    'authentication message-digest',
+                    'authentication mode md5',
+                    'neighbor.*password',
+                    'area.*authentication',
+                    'key chain',
+                    'authentication key-chain'
+                ]
+                
+                for keyword in auth_keywords:
+                    if re.search(keyword, line_clean, re.IGNORECASE):
+                        current_config['has_authentication'] = True
+                        current_config['auth_type'] = keyword
+                        break
+        
+        # 새 섹션 시작
+        elif not line_clean.startswith(' ') and line_clean:
+            current_protocol = None
+            current_config = None
+    
+    return routing_protocols

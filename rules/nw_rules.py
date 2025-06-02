@@ -49,14 +49,16 @@ NW_RULES = {
         severity="상",
         category=RuleCategory.ACCOUNT_MANAGEMENT,
         patterns=[
-            r"enable\s+password\s+(cisco|admin|password|123|1234|default|switch|router)",
-            r"username\s+\w+\s+password\s+(cisco|admin|password|123|1234|default|switch|router)",
-            r"username\s+(admin|cisco|root)\s+password\s+\w+",
+            # 더 정확한 패턴
+            r"enable\s+password\s+(?:0\s+)?(cisco|admin|password|123|1234|default|switch|router)\s*$",
+            r"username\s+\w+\s+password\s+(?:0\s+)?(cisco|admin|password|123|1234|default|switch|router)\s*$",
+            r"username\s+(admin|cisco|root|guest)\s+password\s+",
         ],
         negative_patterns=[
-            r"enable\s+secret\s+\$1\$",
+            r"enable\s+secret\s+[45]\s+\$",  # Type 4,5 암호화
             r"service\s+password-encryption",
-            r"username\s+\w+\s+secret\s+\$"
+            r"username\s+\w+\s+secret\s+",
+            r"username\s+\w+\s+password\s+[57]\s+",  # 암호화된 패스워드
         ],
         device_types=["Cisco", "Alteon", "Passport", "Juniper", "Piolink", "HP", "Dasan", "Netgear", "Radware"],
         recommendation="기본 패스워드를 강력한 패스워드로 변경하고 enable secret 명령어 사용",
@@ -71,13 +73,15 @@ NW_RULES = {
         severity="상",
         category=RuleCategory.ACCOUNT_MANAGEMENT,
         patterns=[
-            r"enable\s+password\s+\w{1,7}$",
-            r"username\s+\w+\s+password\s+\w{1,7}$",
+            # 평문 패스워드만 탐지
+            r"enable\s+password\s+(?:0\s+)?\w{1,7}\s*$",
+            r"username\s+\w+\s+password\s+(?:0\s+)?\w{1,7}\s*$",
         ],
         negative_patterns=[
-            r"security\s+passwords\s+min-length\s+[8-9]|[1-9][0-9]",
-            r"username-password\s+combination\s+high",
-            r"username-password\s+min-length\s+[8-9]"
+            r"security\s+passwords\s+min-length",
+            r"username\s+\w+\s+secret",  # secret 사용시 제외
+            r"service\s+password-encryption",  # 암호화 서비스 사용시
+            r"username\s+\w+\s+password\s+[57]\s+",  # 이미 암호화된 경우
         ],
         device_types=["Cisco", "Piolink", "Alcatel"],
         recommendation="패스워드 복잡성 정책 설정 및 최소 8자 이상의 복잡한 패스워드 사용",
@@ -136,10 +140,12 @@ NW_RULES = {
         severity="상",
         category=RuleCategory.ACCESS_MANAGEMENT,
         patterns=[
-            r"line\s+vty.*(?:\n(?!.*access-class).*)*"
+            # VTY 라인에 access-class가 없는 경우만
+            r"line\s+vty\s+\d+(?:\s+\d+)?(?:\n(?!.*access-class).*)*?(?=line|\Z)",
         ],
         negative_patterns=[
-            r"line\s+vty.*\n.*access-class\s+\d+\s+in"
+            r"line\s+vty.*\n(?:.*\n)*?\s*access-class\s+\d+\s+in",
+            r"transport\s+input\s+none",  # 접속 자체를 차단한 경우
         ],
         device_types=["Cisco", "Radware", "Passport", "Juniper", "Piolink", "HP", "Dasan", "Alcatel"],
         recommendation="네트워크 장비에 접근 가능한 관리자 IP를 설정하여 VTY 서비스 미사용 시 설정 불필요",
@@ -426,18 +432,26 @@ NW_RULES = {
     "NW-21": SecurityRule(
         rule_id="NW-21",
         title="Spoofing 방지 필터링 적용 또는 보안장비 사용",
-        description="IP 스푸핑 기반 Dos 공격 트래픽이 네트워크 장비의 한계용량을 초과하는 경우 정상적인 서비스가 불가능해 된다",
+        description="IP 스푸핑 기반 DoS 공격 트래픽이 네트워크 장비의 한계용량을 초과하는 경우 정상적인 서비스가 불가능해 된다",
         severity="중",
         category=RuleCategory.FUNCTION_MANAGEMENT,
-        patterns=[],
+        patterns=[
+            # 패턴 기반 검사는 논리 검사로 대체
+        ],
         negative_patterns=[
-            r"access-list\s+\d+\s+deny\s+ip\s+0\.0\.0\.0",
-            r"access-list\s+\d+\s+deny\s+ip\s+10\.0\.0\.0",
-            r"access-list\s+\d+\s+deny\s+ip\s+127\.0\.0\.0",
-            r"firewall\s+family\s+inet\s+filter"
+            # 기본적인 스푸핑 방지 설정들
+            r"access-list\s+\d+\s+deny\s+ip\s+(?:host\s+)?0\.0\.0\.0",
+            r"access-list\s+\d+\s+deny\s+ip\s+10\.0\.0\.0\s+0\.255\.255\.255",
+            r"access-list\s+\d+\s+deny\s+ip\s+172\.1[6-9]\.0\.0",
+            r"access-list\s+\d+\s+deny\s+ip\s+172\.2[0-9]\.0\.0",
+            r"access-list\s+\d+\s+deny\s+ip\s+172\.3[0-1]\.0\.0",
+            r"access-list\s+\d+\s+deny\s+ip\s+192\.168\.0\.0\s+0\.0\.255\.255",
+            r"access-list\s+\d+\s+deny\s+ip\s+127\.0\.0\.0\s+0\.255\.255\.255",
+            r"access-list\s+\d+\s+deny\s+ip\s+22[4-9]\.",
+            r"access-list\s+\d+\s+deny\s+ip\s+23[0-9]\.",
         ],
         device_types=["Cisco", "Juniper"],
-        recommendation="IP spoofing 공격 방지를 위해서 루프 백, 브로드캐스트 주소, 멀티캐스트 주소를 가진 패킷은 차단해야 한다",
+        recommendation="IP spoofing 공격 방지를 위해서 루프백, 브로드캐스트 주소, 멀티캐스트 주소를 가진 패킷은 차단해야 한다",
         reference="NW 가이드 NW-21 (중) Spoofing 방지 필터링 적용 또는 보안장비 사용",
         logical_check_function=check_nw_21,
     ),
@@ -727,14 +741,17 @@ NW_RULES = {
     "NW-38": SecurityRule(
         rule_id="NW-38",
         title="스위치, 허브 보안 강화",
-        description="포트 보안을 설정하지 않을 경우 동일 네트워크 내에서 MAC flooding, ARP spoofing 공격으로 비인가자에게 패킷 정보가 재공될 수 있음",
+        description="포트 보안을 설정하지 않을 경우 동일 네트워크 내에서 MAC flooding, ARP spoofing 공격으로 비인가자에게 패킷 정보가 제공될 수 있음",
         severity="중",
         category=RuleCategory.FUNCTION_MANAGEMENT,
         patterns=[
-            r"switchport\s+mode\s+access\s*(?!\s*switchport\s+port-security)"
+            # 스위치포트 액세스 모드인데 포트 시큐리티가 없는 경우
+            r"interface\s+\S+\s*\n(?=.*switchport\s+mode\s+access)(?!.*port-security)",
         ],
         negative_patterns=[
-            r"switchport\s+port-security"
+            r"switchport\s+port-security",
+            r"switchport\s+mode\s+trunk",  # 트렁크 포트는 제외
+            r"switchport\s+voice\s+vlan",  # 음성 VLAN은 제외
         ],
         device_types=["Cisco", "스위치"],
         recommendation="스위치 포트 보안 설정(switchport port-security) 적용",
