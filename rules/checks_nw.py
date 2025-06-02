@@ -624,7 +624,7 @@ def check_nw_21(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
                 'external_interfaces': external_interfaces,
                 'applied_acls': applied_acls,
                 'recommendation': 'Consider adding ACLs for: ' + ', '.join(missing),
-                'severity_adjusted': 'low' if protection_count >= 2 else 'medium'
+                'severity_adjusted': 'Low' if protection_count >= 2 else 'Medium'
             }
         })
     
