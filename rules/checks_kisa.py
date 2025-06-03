@@ -107,11 +107,21 @@ def check_password_complexity(line: str, line_num: int, context: ConfigContext) 
 
 
 def check_password_encryption(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """N-03: 암호화된 패스워드 사용 - 논리 기반 분석 (최신 장비 지원)"""
+    """N-03: 암호화된 패스워드 사용 - 개선된 논리 기반 분석"""
     vulnerabilities = []
     
     # Service password-encryption 확인
     password_encryption_enabled = context.parsed_services.get('password-encryption', False)
+    
+    # Console 라인에서 평문 패스워드 확인
+    console_password_issues = []
+    for line_content in context.config_lines:
+        if 'line con' in line_content.lower():
+            # console 설정 섹션 시작
+            continue
+        if line_content.strip().startswith('password ') and not any(enc in line_content for enc in ['$', '7 ', '5 ']):
+            # 평문 패스워드 발견
+            console_password_issues.append(line_content.strip())
     
     # Enable password vs secret 확인
     if context.global_settings.get('enable_password_type') == 'password':
@@ -120,7 +130,19 @@ def check_password_encryption(line: str, line_num: int, context: ConfigContext) 
             'matched_text': 'enable password (not secret)',
             'details': {
                 'vulnerability': 'enable_password_not_secret',
-                'recommendation': 'Use enable secret with algorithm-type sha256 or enable algorithm-type scrypt secret'
+                'recommendation': 'Use enable secret instead of enable password'
+            }
+        })
+    
+    # Service password-encryption이 비활성화되고 평문 패스워드가 있는 경우
+    if not password_encryption_enabled and console_password_issues:
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': 'service password-encryption disabled with plaintext passwords',
+            'details': {
+                'vulnerability': 'password_encryption_disabled',
+                'plaintext_passwords': console_password_issues,
+                'recommendation': 'Enable service password-encryption'
             }
         })
     
@@ -128,7 +150,7 @@ def check_password_encryption(line: str, line_num: int, context: ConfigContext) 
     for user in context.parsed_users:
         user_issues = []
         
-        # 최신 강력한 암호화를 사용하는 경우는 양호
+        # 이미 강력한 암호화를 사용하는 경우는 제외
         if user.get('is_modern_encryption', False):
             continue
             
@@ -148,16 +170,10 @@ def check_password_encryption(line: str, line_num: int, context: ConfigContext) 
         elif user.get('encryption_type') == 'type0_plaintext':
             user_issues.append('plaintext_password')
         
-        # 오래된 MD5 암호화만 사용
-        elif user.get('encryption_type') == 'type5_md5' and not user.get('algorithm_type'):
-            user_issues.append('outdated_md5_only')
-        
         if user_issues:
-            recommendation = "Use username secret with algorithm-type sha256 or scrypt for modern security"
+            recommendation = "Use username secret with strong encryption"
             if 'weak_type7_encryption' in user_issues:
-                recommendation = "Replace Type 7 encryption with algorithm-type sha256 secret"
-            elif 'outdated_md5_only' in user_issues:
-                recommendation = "Consider upgrading from MD5 to algorithm-type sha256 for better security"
+                recommendation = "Replace Type 7 encryption with secret"
             
             vulnerabilities.append({
                 'line': user['line_number'],
@@ -167,7 +183,6 @@ def check_password_encryption(line: str, line_num: int, context: ConfigContext) 
                     'username': user['username'],
                     'issues': user_issues,
                     'current_encryption': user.get('encryption_type', 'none'),
-                    'algorithm_type': user.get('algorithm_type'),
                     'recommendation': recommendation
                 }
             })
@@ -176,8 +191,20 @@ def check_password_encryption(line: str, line_num: int, context: ConfigContext) 
 
 
 def check_vty_access_control(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """N-04: VTY 접근 제한 설정 - 완전한 논리 기반 분석"""
+    """N-04: VTY 접근 제한 설정 - 개선된 논리 기반 분석"""
     vulnerabilities = []
+    
+    if not context.vty_lines:
+        # VTY 설정이 아예 없는 경우
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': 'No VTY configuration found',
+            'details': {
+                'vulnerability': 'no_vty_configuration',
+                'recommendation': 'Configure VTY lines with access-class restrictions'
+            }
+        })
+        return vulnerabilities
     
     for vty_line in context.vty_lines:
         issues = []
@@ -187,12 +214,15 @@ def check_vty_access_control(line: str, line_num: int, context: ConfigContext) -
             issues.append('no_access_class')
         
         # Transport input 확인  
-        if 'all' in vty_line.get('transport_input', []) or 'telnet' in vty_line.get('transport_input', []):
-            issues.append('insecure_transport')
+        transport_input = vty_line.get('transport_input', [])
+        if 'all' in transport_input:
+            issues.append('transport_all_allowed')
+        elif 'telnet' in transport_input:
+            issues.append('telnet_allowed')
         
         # 패스워드 확인
-        if not vty_line['has_password']:
-            issues.append('no_password')
+        if not vty_line['has_password'] and vty_line.get('login_method') != 'login local':
+            issues.append('no_authentication')
         
         if issues:
             vulnerability_details = {
@@ -202,12 +232,15 @@ def check_vty_access_control(line: str, line_num: int, context: ConfigContext) -
                     'issues': issues,
                     'vty_config': vty_line,
                     'has_access_class': vty_line['has_access_class'],
-                    'transport_input': vty_line.get('transport_input', [])
+                    'transport_input': transport_input,
+                    'access_class': vty_line.get('access_class'),
+                    'recommendation': 'Configure access-class for VTY lines to restrict source IPs'
                 }
             }
             vulnerabilities.append(vulnerability_details)
     
     return vulnerabilities
+
 
 
 def check_session_timeout(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
@@ -300,23 +333,72 @@ def check_snmp_service_status(line: str, line_num: int, context: ConfigContext) 
     return vulnerabilities
 
 
-def check_snmp_acl_configuration(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """N-09: SNMP ACL 설정 - 논리 기반 분석"""
+def check_snmp_security(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
+    """N-08: SNMP Community String 복잡성 - 개선된 논리 기반 분석"""
     vulnerabilities = []
     
+    if not context.snmp_communities:
+        # SNMP가 설정되지 않은 경우는 취약점이 아님
+        return vulnerabilities
+    
     for community_info in context.snmp_communities:
-        if not community_info['acl']:
+        issues = []
+        
+        # 기본 커뮤니티 스트링 확인
+        if community_info['is_default']:
+            issues.append('default_community')
+        
+        # 길이 확인
+        if community_info['length'] < 8:
+            issues.append('too_short')
+        
+        # 단순한 패턴 확인
+        simple_patterns = ['123', '456', '111', '000', 'admin', 'test', 'temp', 'cisco', 'router', 'switch']
+        if any(pattern in community_info['community'].lower() for pattern in simple_patterns):
+            issues.append('simple_pattern')
+        
+        # 숫자만 또는 문자만으로 구성된 경우
+        community = community_info['community']
+        if len(community) > 3 and (community.isdigit() or community.isalpha()):
+            issues.append('lacks_complexity')
+        
+        if issues:
             vulnerabilities.append({
                 'line': community_info['line_number'],
                 'matched_text': f"snmp-server community {community_info['community']}",
                 'details': {
-                    'vulnerability': 'no_snmp_acl',
                     'community': community_info['community'],
+                    'issues': issues,
+                    'permission': community_info['permission'],
+                    'has_acl': bool(community_info['acl']),
+                    'community_length': community_info['length'],
+                    'is_default': community_info['is_default'],
+                    'recommendation': 'Use complex community string (min 8 chars, avoid default values like public/private)'
+                }
+            })
+    
+    return vulnerabilities
+
+def check_snmp_acl_configuration(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
+    """N-09: SNMP ACL 설정 - 개선된 논리 기반 분석"""
+    vulnerabilities = []
+    
+    for community_info in context.snmp_communities:
+        # ACL 설정 확인
+        if not community_info.get('acl'):
+            vulnerabilities.append({
+                'line': community_info['line_number'],
+                'matched_text': f"snmp-server community {community_info['community']} {community_info['permission']}",
+                'details': {
+                    'community': community_info['community'],
+                    'vulnerability': 'no_acl_configured',
+                    'permission': community_info['permission'],
                     'recommendation': 'Configure ACL for SNMP community access restriction'
                 }
             })
     
     return vulnerabilities
+
 
 
 def check_snmp_community_permissions(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
@@ -413,29 +495,54 @@ def check_ddos_protection(line: str, line_num: int, context: ConfigContext) -> L
 
 
 def check_unused_interface_shutdown(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """N-14: 사용하지 않는 인터페이스의 Shutdown 설정 - 완전한 논리 기반 분석"""
+    """N-14: 사용하지 않는 인터페이스의 Shutdown 설정 - 개선된 분석"""
     vulnerabilities = []
     
+    # 메인 인터페이스와 서브인터페이스 분리
+    main_interfaces = {}
+    sub_interfaces = {}
+    
     for interface_name, interface_config in context.parsed_interfaces.items():
-        # 사용 중인지 판단
+        if interface_config.get('is_subinterface', False):
+            # 서브인터페이스
+            main_name = interface_name.split('.')[0]
+            if main_name not in sub_interfaces:
+                sub_interfaces[main_name] = []
+            sub_interfaces[main_name].append(interface_config)
+        else:
+            # 메인 인터페이스
+            main_interfaces[interface_name] = interface_config
+    
+    for interface_name, interface_config in main_interfaces.items():
+        # 물리적 인터페이스만 체크
+        is_physical = interface_config['port_type'] in [
+            'FastEthernet', 'GigabitEthernet', 'TenGigabitEthernet', 'Serial'
+        ]
+        
+        if not is_physical:
+            continue
+        
+        # 서브인터페이스가 있는 경우 메인 인터페이스는 사용 중으로 간주
+        has_subinterfaces = interface_name in sub_interfaces
+        
+        # 사용 여부 판단
         is_used = (
             interface_config['has_ip_address'] or
             interface_config['has_description'] or
             interface_config['has_vlan'] or
             interface_config['is_loopback'] or
             interface_config['is_management'] or
-            interface_config['has_switchport']
+            interface_config['has_switchport'] or
+            has_subinterfaces
         )
         
-        is_active = not interface_config['is_shutdown']
+        is_shutdown = interface_config['is_shutdown']
         
         # 중요 인터페이스 예외 처리
         is_critical = _is_critical_interface(interface_name, context.device_type)
         
-        # 물리적 인터페이스만 체크 (VLAN, Loopback 제외)
-        is_physical = interface_config['port_type'] in ['FastEthernet', 'GigabitEthernet', 'TenGigabitEthernet', 'Serial']
-        
-        if not is_used and is_active and not is_critical and is_physical:
+        # 미사용이면서 활성화된 물리 인터페이스만 보고
+        if not is_used and not is_shutdown and not is_critical:
             vulnerabilities.append({
                 'line': interface_config['line_number'],
                 'matched_text': f"interface {interface_name}",
@@ -446,10 +553,11 @@ def check_unused_interface_shutdown(line: str, line_num: int, context: ConfigCon
                     'has_ip': interface_config['has_ip_address'],
                     'has_description': interface_config['has_description'],
                     'has_vlan': interface_config['has_vlan'],
-                    'is_shutdown': interface_config['is_shutdown'],
+                    'has_subinterfaces': has_subinterfaces,
+                    'is_shutdown': is_shutdown,
+                    'recommendation': 'Add shutdown command to disable unused interface',
                     'analysis': {
                         'is_used': is_used,
-                        'is_active': is_active,
                         'is_critical': is_critical,
                         'is_physical': is_physical
                     }
@@ -457,6 +565,7 @@ def check_unused_interface_shutdown(line: str, line_num: int, context: ConfigCon
             })
     
     return vulnerabilities
+
 
 
 def check_user_privilege_levels(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
@@ -1062,44 +1171,6 @@ def check_switch_hub_security(line: str, line_num: int, context: ConfigContext) 
     return vulnerabilities
 
 
-def check_snmp_security(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """N-08: SNMP Community String 복잡성 - 완전한 논리 기반 분석"""
-    vulnerabilities = []
-    
-    for community_info in context.snmp_communities:
-        issues = []
-        
-        # 기본 커뮤니티 스트링 확인
-        if community_info['is_default']:
-            issues.append('default_community')
-        
-        # 길이 확인
-        if community_info['length'] < 6:
-            issues.append('too_short')
-        
-        # 단순한 패턴 확인
-        simple_patterns = ['123', '456', '111', '000', 'admin', 'test', 'temp']
-        if any(pattern in community_info['community'].lower() for pattern in simple_patterns):
-            issues.append('simple_pattern')
-        
-        # ACL 확인
-        if not community_info['acl']:
-            issues.append('no_acl')
-        
-        if issues:
-            vulnerabilities.append({
-                'line': community_info['line_number'],
-                'matched_text': f"snmp-server community {community_info['community']}",
-                'details': {
-                    'community': community_info['community'],
-                    'issues': issues,
-                    'permission': community_info['permission'],
-                    'has_acl': bool(community_info['acl']),
-                    'community_length': community_info['length']
-                }
-            })
-    
-    return vulnerabilities
 
 
 def _is_critical_interface(interface_name: str, device_type: str) -> bool:

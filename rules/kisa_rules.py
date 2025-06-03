@@ -102,19 +102,22 @@ def parse_config_context(config_text: str, device_type: str) -> ConfigContext:
 
 
 def _parse_cisco_config_complete(context: ConfigContext):
-    """Cisco 설정 완전 파싱"""
+    """Cisco 설정 완전 파싱 - 개선된 버전"""
     lines = context.config_lines
     current_interface = None
     interface_config = {}
     current_vty = None
     vty_config = {}
     current_section = None
+    in_vty_section = False
     
     for i, line in enumerate(lines):
+        original_line = line
         line = line.strip()
         
         # 인터페이스 설정 파싱
         if line.startswith('interface '):
+            # 이전 인터페이스 저장
             if current_interface and interface_config:
                 context.parsed_interfaces[current_interface] = interface_config
             
@@ -131,15 +134,25 @@ def _parse_cisco_config_complete(context: ConfigContext):
                 'is_management': 'mgmt' in current_interface.lower() or 'management' in current_interface.lower(),
                 'port_type': _get_cisco_port_type(current_interface),
                 'has_switchport': False,
-                'vlan_id': None
+                'vlan_id': None,
+                'is_subinterface': '.' in current_interface
             }
+            current_section = 'interface'
+            in_vty_section = False
             
-        elif current_interface and line and not line.startswith('!'):
+        elif current_interface and line and not line.startswith('!') and original_line.startswith(' '):
+            # 인터페이스 하위 설정
             interface_config['config_lines'].append(line)
             
             # 인터페이스 속성 분석
             if line.startswith('ip address') and not line.startswith('no ip address'):
-                interface_config['has_ip_address'] = True
+                # IP 주소 패턴 확인 (DHCP 제외)
+                if not 'dhcp' in line.lower():
+                    interface_config['has_ip_address'] = True
+                    # IP 주소 추출
+                    ip_match = re.search(r'ip address (\d+\.\d+\.\d+\.\d+)', line)
+                    if ip_match:
+                        interface_config['ip_address'] = ip_match.group(1)
             elif line.startswith('no ip address'):
                 interface_config['has_ip_address'] = False
             elif line.startswith('description'):
@@ -155,9 +168,18 @@ def _parse_cisco_config_complete(context: ConfigContext):
                         interface_config['has_vlan'] = True
                     except:
                         pass
+            elif 'encapsulation dot1q' in line.lower() or 'encapsulation dot1Q' in line:
+                interface_config['has_vlan'] = True
+                try:
+                    vlan_match = re.search(r'dot1[qQ]\s+(\d+)', line)
+                    if vlan_match:
+                        interface_config['vlan_id'] = int(vlan_match.group(1))
+                except:
+                    pass
         
-        # VTY 라인 파싱
+        # VTY 라인 파싱 개선
         elif line.startswith('line vty'):
+            # 이전 VTY 저장
             if current_vty and vty_config:
                 context.vty_lines.append(vty_config)
             
@@ -169,27 +191,47 @@ def _parse_cisco_config_complete(context: ConfigContext):
                 'has_access_class': False,
                 'transport_input': [],
                 'exec_timeout': None,
-                'login_method': None
+                'login_method': None,
+                'access_class': None
             }
+            current_section = 'vty'
+            in_vty_section = True
             
-        elif current_vty and line and not line.startswith('!') and line.startswith(' '):
+        elif in_vty_section and current_vty and original_line.startswith(' ') and line:
+            # VTY 하위 설정
             if 'password' in line:
                 vty_config['has_password'] = True
             elif 'access-class' in line:
                 vty_config['has_access_class'] = True
-                vty_config['access_class'] = line.split()[-2] if len(line.split()) > 2 else None
+                # ACL 이름/번호 추출
+                parts = line.split()
+                if len(parts) >= 2:
+                    for j in range(len(parts)):
+                        if parts[j] == 'access-class' and j + 1 < len(parts):
+                            vty_config['access_class'] = parts[j + 1]
+                            break
             elif 'transport input' in line:
-                vty_config['transport_input'] = line.split()[2:]
+                transport_parts = line.split('transport input')
+                if len(transport_parts) > 1:
+                    vty_config['transport_input'] = transport_parts[1].strip().split()
             elif 'exec-timeout' in line:
                 try:
-                    timeout_parts = line.split()[1:3]
-                    vty_config['exec_timeout'] = int(timeout_parts[0]) * 60 + (int(timeout_parts[1]) if len(timeout_parts) > 1 else 0)
+                    timeout_parts = line.split()
+                    if len(timeout_parts) >= 2:
+                        minutes = int(timeout_parts[1])
+                        seconds = int(timeout_parts[2]) if len(timeout_parts) > 2 else 0
+                        vty_config['exec_timeout'] = minutes * 60 + seconds
                 except:
                     pass
             elif line.strip() in ['login', 'login local']:
                 vty_config['login_method'] = line.strip()
         
-        # 사용자 계정 파싱
+        # 다른 섹션 시작시 VTY 섹션 종료
+        elif in_vty_section and not original_line.startswith(' ') and line and not line.startswith('!'):
+            in_vty_section = False
+            current_section = None
+        
+        # 사용자 계정 파싱 개선
         elif line.startswith('username '):
             user_parts = line.split()
             if len(user_parts) >= 3:
@@ -203,7 +245,8 @@ def _parse_cisco_config_complete(context: ConfigContext):
                     'password_encrypted': False,
                     'encryption_type': None,
                     'algorithm_type': None,
-                    'is_modern_encryption': False
+                    'is_modern_encryption': False,
+                    'password_type': 'secret' if 'secret' in line else 'password'
                 }
                 
                 # 권한 레벨 파싱
@@ -222,7 +265,6 @@ def _parse_cisco_config_complete(context: ConfigContext):
                         if algo_idx + 1 < len(user_parts):
                             algorithm = user_parts[algo_idx + 1]
                             user_info['algorithm_type'] = algorithm
-                            # 강력한 암호화 알고리즘 확인
                             if algorithm.lower() in ['sha256', 'scrypt', 'pbkdf2']:
                                 user_info['is_modern_encryption'] = True
                                 user_info['password_encrypted'] = True
@@ -233,84 +275,70 @@ def _parse_cisco_config_complete(context: ConfigContext):
                 if 'password' in line:
                     if '$' in line or ' 7 ' in line or ' 0 ' in line:
                         user_info['password_encrypted'] = True
-                        # 암호화 타입 식별
-                        if ' 9 $' in line:  # Type 9 (scrypt)
+                        if ' 9 $' in line:
                             user_info['encryption_type'] = 'type9_scrypt'
                             user_info['is_modern_encryption'] = True
-                        elif ' 8 $' in line:  # Type 8 (PBKDF2)
+                        elif ' 8 $' in line:
                             user_info['encryption_type'] = 'type8_pbkdf2'  
                             user_info['is_modern_encryption'] = True
-                        elif ' 5 $' in line:  # Type 5 (MD5)
+                        elif ' 5 $' in line:
                             user_info['encryption_type'] = 'type5_md5'
-                        elif ' 7 ' in line:  # Type 7 (weak)
+                        elif ' 7 ' in line:
                             user_info['encryption_type'] = 'type7_weak'
-                        elif ' 0 ' in line:  # Type 0 (plaintext)
+                        elif ' 0 ' in line:
                             user_info['encryption_type'] = 'type0_plaintext'
                             user_info['password_encrypted'] = False
                 
                 elif 'secret' in line:
                     user_info['password_encrypted'] = True
-                    # Secret 타입별 암호화 방식 확인
-                    if re.search(r'secret\s+9\s+\$', line):  # Type 9 (scrypt)
+                    if re.search(r'secret\s+9\s+\$', line):
                         user_info['encryption_type'] = 'type9_scrypt'
                         user_info['is_modern_encryption'] = True
-                    elif re.search(r'secret\s+8\s+\$', line):  # Type 8 (PBKDF2)
+                    elif re.search(r'secret\s+8\s+\$', line):
                         user_info['encryption_type'] = 'type8_pbkdf2'
                         user_info['is_modern_encryption'] = True
-                    elif re.search(r'secret\s+5\s+\$', line) or '$1$' in line:  # Type 5 (MD5)
+                    elif re.search(r'secret\s+5\s+\$', line) or '$1$' in line:
                         user_info['encryption_type'] = 'type5_md5'
-                    elif re.search(r'secret\s+0\s+', line):  # Type 0 (plaintext)
+                    elif re.search(r'secret\s+0\s+', line):
                         user_info['encryption_type'] = 'type0_plaintext'
                         user_info['password_encrypted'] = False
                     else:
-                        # 기본 secret (보통 Type 5)
                         user_info['encryption_type'] = 'type5_md5'
                 
                 context.parsed_users.append(user_info)
         
-                if 'privilege' in line:
-                    try:
-                        priv_idx = user_parts.index('privilege')
-                        if priv_idx + 1 < len(user_parts):
-                            user_info['privilege_level'] = int(user_parts[priv_idx + 1])
-                    except:
-                        pass
-                
-                if 'password' in line and ('$' in line or '7 ' in line):
-                    user_info['password_encrypted'] = True
-                elif 'secret' in line:
-                    user_info['password_encrypted'] = True
-                
-                context.parsed_users.append(user_info)
-        
-        # SNMP 커뮤니티 파싱
+        # SNMP 커뮤니티 파싱 개선
         elif line.startswith('snmp-server community'):
             parts = line.split()
             if len(parts) >= 3:
+                community = parts[2]
+                # 권한 확인 (RO/RW)
+                permission = 'RO'  # 기본값
+                acl = None
+                
+                for j in range(3, len(parts)):
+                    part = parts[j].upper()
+                    if part in ['RO', 'RW', 'READ-ONLY', 'READ-WRITE']:
+                        permission = part
+                    elif part.isdigit() or (part.isalnum() and len(part) > 2):
+                        # ACL 번호나 이름
+                        acl = parts[j]
+                
                 community_info = {
-                    'community': parts[2],
+                    'community': community,
                     'line_number': i + 1,
-                    'permission': parts[3] if len(parts) > 3 else 'RO',
-                    'acl': parts[4] if len(parts) > 4 and parts[4].isdigit() else None,
-                    'is_default': parts[2].lower() in ['public', 'private'],
-                    'length': len(parts[2])
+                    'permission': permission,
+                    'acl': acl,
+                    'is_default': community.lower() in ['public', 'private'],
+                    'length': len(community)
                 }
                 context.snmp_communities.append(community_info)
         
-        # Access List 파싱
-        elif line.startswith('access-list '):
-            parts = line.split()
-            if len(parts) >= 3:
-                acl_number = parts[1]
-                if acl_number not in context.access_lists:
-                    context.access_lists[acl_number] = []
-                context.access_lists[acl_number].append(line)
-        
-        # 글로벌 설정 파싱
+        # 나머지 파싱 로직들...
+        # Enable password 확인
         elif line.startswith('enable '):
             if 'password' in line:
                 context.global_settings['enable_password_type'] = 'password'
-                # 기본 패스워드 체크
                 password_part = line.split('enable password ', 1)[1].strip() if 'enable password ' in line else ''
                 context.global_settings['enable_password_value'] = password_part
             elif 'secret' in line:

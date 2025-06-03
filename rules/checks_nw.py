@@ -128,11 +128,18 @@ def check_nw_02(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
 
 
 def check_nw_03(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """NW-03: 암호화된 비밀번호 사용 - 논리 기반 분석"""
+    """NW-03: 암호화된 비밀번호 사용 - 개선된 논리 기반 분석"""
     vulnerabilities = []
     
     # Service password-encryption 확인
     password_encryption_enabled = context.parsed_services.get('password-encryption', False)
+    
+    # Console 라인에서 평문 패스워드 확인
+    console_password_found = False
+    for line_content in context.config_lines:
+        if line_content.strip().startswith('password ') and not any(enc in line_content for enc in ['$', '7 ', '5 ']):
+            console_password_found = True
+            break
     
     # Enable password vs secret 확인
     if context.global_settings.get('enable_password_type') == 'password':
@@ -145,8 +152,21 @@ def check_nw_03(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
             }
         })
     
+    # Service password-encryption 확인
+    if not password_encryption_enabled and console_password_found:
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': 'service password-encryption disabled with plaintext passwords',
+            'details': {
+                'vulnerability': 'password_encryption_disabled',
+                'has_console_password': console_password_found,
+                'recommendation': 'Enable service password-encryption'
+            }
+        })
+    
     # 암호화되지 않은 사용자 패스워드 확인
-    unencrypted_users = [user for user in context.parsed_users if user['has_password'] and not user['password_encrypted']]
+    unencrypted_users = [user for user in context.parsed_users 
+                        if user['has_password'] and not user['password_encrypted']]
     
     if unencrypted_users:
         for user in unencrypted_users:
@@ -159,16 +179,6 @@ def check_nw_03(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
                     'recommendation': 'Use username secret or enable service password-encryption'
                 }
             })
-    
-    if not password_encryption_enabled and unencrypted_users:
-        vulnerabilities.append({
-            'line': 0,
-            'matched_text': 'service password-encryption not enabled',
-            'details': {
-                'vulnerability': 'password_encryption_disabled',
-                'recommendation': 'Enable service password-encryption'
-            }
-        })
     
     return vulnerabilities
 
@@ -225,8 +235,19 @@ def check_nw_04(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
 
 
 def check_nw_05(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """NW-05: VTY 접근(ACL) 설정 - 완전한 논리 기반 분석"""
+    """NW-05: VTY 접근(ACL) 설정 - 개선된 논리 기반 분석"""
     vulnerabilities = []
+    
+    if not context.vty_lines:
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': 'No VTY configuration found',
+            'details': {
+                'vulnerability': 'no_vty_configuration',
+                'recommendation': 'Configure VTY lines with access-class restrictions'
+            }
+        })
+        return vulnerabilities
     
     for vty_line in context.vty_lines:
         issues = []
@@ -241,8 +262,8 @@ def check_nw_05(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
             issues.append('transport_all_allowed')
         
         # 패스워드 확인
-        if not vty_line['has_password']:
-            issues.append('no_password')
+        if not vty_line['has_password'] and vty_line.get('login_method') != 'login local':
+            issues.append('no_authentication')
         
         if issues:
             vulnerability_details = {
@@ -253,6 +274,7 @@ def check_nw_05(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
                     'vty_config': vty_line,
                     'has_access_class': vty_line['has_access_class'],
                     'transport_input': transport_input,
+                    'access_class': vty_line.get('access_class'),
                     'recommendation': 'Configure access-class for VTY lines to restrict source IPs'
                 }
             }
@@ -598,8 +620,11 @@ def check_nw_16(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
 
 
 def check_nw_17(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """NW-17: SNMP community string 복잡성 설정 - 논리 기반 분석"""
+    """NW-17: SNMP community string 복잡성 설정 - 개선된 논리 기반 분석"""
     vulnerabilities = []
+    
+    if not context.snmp_communities:
+        return vulnerabilities
     
     for community_info in context.snmp_communities:
         issues = []
@@ -613,13 +638,13 @@ def check_nw_17(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
             issues.append('too_short')
         
         # 단순한 패턴 확인
-        simple_patterns = ['123', '456', '111', '000', 'admin', 'test', 'temp', 'snmp']
+        simple_patterns = ['123', '456', '111', '000', 'admin', 'test', 'temp', 'snmp', 'cisco', 'router']
         if any(pattern in community_info['community'].lower() for pattern in simple_patterns):
             issues.append('simple_pattern')
         
         # 복잡성 부족 (숫자만 또는 문자만)
         community = community_info['community']
-        if community.isdigit() or community.isalpha():
+        if len(community) > 3 and (community.isdigit() or community.isalpha()):
             issues.append('lacks_complexity')
         
         if issues:
@@ -630,7 +655,8 @@ def check_nw_17(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
                     'community': community_info['community'],
                     'issues': issues,
                     'community_length': community_info['length'],
-                    'recommendation': 'Use complex community string with minimum 8 characters'
+                    'is_default': community_info['is_default'],
+                    'recommendation': 'Use complex community string with minimum 8 characters, avoid default values'
                 }
             })
     
@@ -638,7 +664,7 @@ def check_nw_17(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
 
 
 def check_nw_18(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """NW-18: SNMP ACL 설정 - 논리 기반 분석"""
+    """NW-18: SNMP ACL 설정 - 개선된 논리 기반 분석"""
     vulnerabilities = []
     
     for community_info in context.snmp_communities:
@@ -646,7 +672,7 @@ def check_nw_18(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
         if not community_info.get('acl'):
             vulnerabilities.append({
                 'line': community_info['line_number'],
-                'matched_text': f"snmp-server community {community_info['community']}",
+                'matched_text': f"snmp-server community {community_info['community']} {community_info['permission']}",
                 'details': {
                     'community': community_info['community'],
                     'vulnerability': 'no_acl_configured',
@@ -1562,6 +1588,7 @@ def _is_private_ip(ip_address: str) -> bool:
 
 
 def _analyze_routing_protocols(context: ConfigContext) -> Dict[str, List[Dict]]:
+
     """라우팅 프로토콜 설정 분석"""
     routing_protocols = {
         'ospf': [],
@@ -1620,3 +1647,26 @@ def _analyze_routing_protocols(context: ConfigContext) -> Dict[str, List[Dict]]:
             current_config = None
     
     return routing_protocols
+
+def _is_critical_interface(interface_name: str, device_type: str) -> bool:
+    """중요 인터페이스 여부 판별"""
+    interface_lower = interface_name.lower()
+    
+    # 항상 중요한 인터페이스들
+    critical_patterns = ['loopback', 'mgmt', 'management', 'console', 'tunnel', 'vlan1']
+    
+    if any(pattern in interface_lower for pattern in critical_patterns):
+        return True
+    
+    # 장비별 특정 중요 인터페이스
+    if device_type == "Cisco":
+        # 첫 번째 물리 포트들은 일반적으로 업링크
+        if (interface_lower.startswith('gi0/0') or interface_lower.startswith('fa0/0') or 
+            interface_lower.startswith('gigabitethernet0/0') or interface_lower.startswith('fastethernet0/0')):
+            return True
+        
+        # Serial 인터페이스는 WAN 연결용
+        if interface_lower.startswith('serial'):
+            return True
+    
+    return False
