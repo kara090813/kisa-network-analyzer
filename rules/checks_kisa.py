@@ -12,20 +12,22 @@ import re
 
 
 def check_basic_password_usage(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """N-01: 기본 패스워드 사용 - 완전한 논리 기반 분석 (최신 장비 지원)"""
+    """N-01: 기본 패스워드 사용 - 개선된 버전"""
     vulnerabilities = []
     
-    # 기본 패스워드 패턴들 (확장)
+    # 확장된 기본 패스워드 패턴 (대소문자 변형 포함)
     basic_passwords = [
         'cisco', 'admin', 'password', '123', '1234', '12345', '123456',
         'default', 'pass', 'root', 'user', 'guest', 'test', 'temp',
-        'cisco123', 'admin123', 'password123'
+        'switch', 'router', 'manager', 'security', 'public', 'private',
+        'cisco123', 'admin123', 'password123', 'switch123', 'router123'
     ]
     
-    # Enable 패스워드 검사
+    # Enable 패스워드 검사 - secret은 제외
     if context.global_settings.get('enable_password_type') == 'password':
         password_value = context.global_settings.get('enable_password_value', '')
-        if any(basic_pwd in password_value.lower() for basic_pwd in basic_passwords):
+        # 대소문자 무시 검사 및 부분 문자열 검사
+        if any(basic_pwd.lower() in password_value.lower() for basic_pwd in basic_passwords):
             vulnerabilities.append({
                 'line': line_num,
                 'matched_text': f"enable password {password_value}",
@@ -33,27 +35,36 @@ def check_basic_password_usage(line: str, line_num: int, context: ConfigContext)
                     'password_type': 'enable_password',
                     'vulnerability': 'basic_password_used',
                     'password_value': password_value,
-                    'recommendation': 'Use enable secret with strong password or algorithm-type'
+                    'recommendation': 'Use enable secret with strong password or algorithm-type',
+                    'severity_adjusted': 'High'
                 }
             })
     
-    # 사용자 패스워드 검사 (최신 버전 고려)
+    # 사용자 패스워드 검사 - 개선된 논리
     for user in context.parsed_users:
-        # 최신 암호화를 사용하는 경우는 양호
+        # 이미 강력한 암호화를 사용하는 경우는 제외
         if user.get('is_modern_encryption', False):
             continue
             
-        # 기본 패스워드 사용 여부 확인
+        # secret 타입도 Type 5 이상인 경우 제외
+        if (user.get('password_type') == 'secret' and 
+            user.get('encryption_type') in ['type5_md5', 'type8_pbkdf2', 'type9_scrypt']):
+            continue
+        
+        # 기본 패스워드 사용 여부 확인 (정교한 검사)
         if user['has_password'] and not user['password_encrypted']:
-            if user['username'].lower() in basic_passwords:
+            username_lower = user['username'].lower()
+            
+            # 사용자명 자체가 기본 패스워드인 경우
+            if username_lower in [pwd.lower() for pwd in basic_passwords]:
                 vulnerabilities.append({
                     'line': user['line_number'],
-                    'matched_text': f"username {user['username']} with basic password",
+                    'matched_text': f"username {user['username']} with basic username",
                     'details': {
                         'password_type': 'user_password',
-                        'vulnerability': 'username_as_password',
+                        'vulnerability': 'basic_username_used',
                         'username': user['username'],
-                        'recommendation': 'Use username secret with algorithm-type sha256 or scrypt'
+                        'recommendation': 'Use non-standard username with username secret'
                     }
                 })
         
@@ -495,7 +506,7 @@ def check_ddos_protection(line: str, line_num: int, context: ConfigContext) -> L
 
 
 def check_unused_interface_shutdown(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """N-14: 사용하지 않는 인터페이스의 Shutdown 설정 - 개선된 분석"""
+    """N-14: 사용하지 않는 인터페이스 Shutdown - 정교한 개선된 버전"""
     vulnerabilities = []
     
     # 메인 인터페이스와 서브인터페이스 분리
@@ -513,6 +524,9 @@ def check_unused_interface_shutdown(line: str, line_num: int, context: ConfigCon
             # 메인 인터페이스
             main_interfaces[interface_name] = interface_config
     
+    # 라우팅, NAT 등에서 참조되는 인터페이스 확인
+    referenced_interfaces = _find_referenced_interfaces(context)
+    
     for interface_name, interface_config in main_interfaces.items():
         # 물리적 인터페이스만 체크
         is_physical = interface_config['port_type'] in [
@@ -522,24 +536,14 @@ def check_unused_interface_shutdown(line: str, line_num: int, context: ConfigCon
         if not is_physical:
             continue
         
-        # 서브인터페이스가 있는 경우 메인 인터페이스는 사용 중으로 간주
-        has_subinterfaces = interface_name in sub_interfaces
-        
-        # 사용 여부 판단
-        is_used = (
-            interface_config['has_ip_address'] or
-            interface_config['has_description'] or
-            interface_config['has_vlan'] or
-            interface_config['is_loopback'] or
-            interface_config['is_management'] or
-            interface_config['has_switchport'] or
-            has_subinterfaces
+        # 사용 여부 정교한 판단
+        usage_indicators = _analyze_interface_usage(
+            interface_name, interface_config, sub_interfaces, referenced_interfaces, context
         )
         
+        is_used = usage_indicators['is_used']
         is_shutdown = interface_config['is_shutdown']
-        
-        # 중요 인터페이스 예외 처리
-        is_critical = _is_critical_interface(interface_name, context.device_type)
+        is_critical = usage_indicators['is_critical']
         
         # 미사용이면서 활성화된 물리 인터페이스만 보고
         if not is_used and not is_shutdown and not is_critical:
@@ -550,21 +554,107 @@ def check_unused_interface_shutdown(line: str, line_num: int, context: ConfigCon
                     'interface_name': interface_name,
                     'port_type': interface_config['port_type'],
                     'reason': 'Unused physical interface not shutdown',
-                    'has_ip': interface_config['has_ip_address'],
-                    'has_description': interface_config['has_description'],
-                    'has_vlan': interface_config['has_vlan'],
-                    'has_subinterfaces': has_subinterfaces,
-                    'is_shutdown': is_shutdown,
+                    'usage_analysis': usage_indicators,
                     'recommendation': 'Add shutdown command to disable unused interface',
-                    'analysis': {
-                        'is_used': is_used,
-                        'is_critical': is_critical,
-                        'is_physical': is_physical
-                    }
+                    'security_risk': 'Potential unauthorized physical access point'
                 }
             })
     
     return vulnerabilities
+def _analyze_interface_usage(interface_name, interface_config, sub_interfaces, referenced_interfaces, context):
+    """인터페이스 사용 여부 정교한 분석"""
+    
+    # 기본 사용 지표들
+    has_ip_address = interface_config['has_ip_address']
+    has_description = interface_config['has_description']
+    has_vlan = interface_config['has_vlan']
+    has_switchport = interface_config.get('has_switchport', False)
+    is_loopback = interface_config.get('is_loopback', False)
+    is_management = interface_config.get('is_management', False)
+    
+    # 서브인터페이스 존재 여부
+    has_subinterfaces = interface_name in sub_interfaces
+    
+    # 다른 설정에서 참조 여부
+    is_referenced = interface_name in referenced_interfaces
+    
+    # 중요한 설정 존재 여부
+    config_lines = interface_config.get('config_lines', [])
+    important_configs = [
+        'channel-group', 'service-policy', 'access-group', 
+        'nat', 'crypto map', 'tunnel', 'bridge-group'
+    ]
+    has_important_config = any(
+        any(config_keyword in line for config_keyword in important_configs)
+        for line in config_lines
+    )
+    
+    # 트렁크 포트 여부
+    is_trunk = any('switchport mode trunk' in line for line in config_lines)
+    
+    # 중요 인터페이스 여부 (더 정교한 판단)
+    is_critical = (
+        is_loopback or is_management or
+        interface_name.lower().endswith('0/0') or  # 보통 첫 번째 포트는 중요
+        'serial' in interface_config['port_type'].lower() or
+        'console' in interface_name.lower() or
+        'mgmt' in interface_name.lower()
+    )
+    
+    # 설명 기반 중요도 판단
+    if has_description:
+        description = interface_config.get('description', '').lower()
+        critical_keywords = ['uplink', 'trunk', 'core', 'wan', 'internet', 'isp', 'link', 'backbone']
+        is_critical = is_critical or any(keyword in description for keyword in critical_keywords)
+    
+    # 최종 사용 여부 판단
+    is_used = (
+        has_ip_address or has_description or has_vlan or has_switchport or
+        has_subinterfaces or is_referenced or has_important_config or is_trunk
+    )
+    
+    return {
+        'is_used': is_used,
+        'is_critical': is_critical,
+        'has_ip_address': has_ip_address,
+        'has_description': has_description,
+        'has_subinterfaces': has_subinterfaces,
+        'is_referenced': is_referenced,
+        'has_important_config': has_important_config,
+        'is_trunk': is_trunk
+    }
+
+
+def _find_referenced_interfaces(context: ConfigContext) -> set:
+    """설정에서 참조되는 인터페이스들 찾기"""
+    referenced = set()
+    
+    for line in context.config_lines:
+        line = line.strip()
+        
+        # NAT 설정에서 참조
+        if 'ip nat' in line and 'interface' in line:
+            match = re.search(r'interface\s+(\S+)', line)
+            if match:
+                referenced.add(match.group(1))
+        
+        # 라우팅에서 참조 (network 명령어)
+        if line.startswith('network '):
+            # 해당 네트워크를 가진 인터페이스 찾기
+            network_match = re.search(r'network\s+(\d+\.\d+\.\d+\.\d+)', line)
+            if network_match:
+                network = network_match.group(1)
+                for iface_name, iface_config in context.parsed_interfaces.items():
+                    if iface_config.get('ip_address', '').startswith(network[:7]):  # 간단한 매칭
+                        referenced.add(iface_name)
+        
+        # HSRP, VRRP 등에서 참조
+        if any(protocol in line for protocol in ['standby', 'vrrp', 'hsrp']):
+            # 현재 인터페이스 컨텍스트에서 실행되는 명령어이므로 별도 처리 필요
+            pass
+    
+    return referenced
+
 
 
 def check_user_privilege_levels(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
@@ -984,26 +1074,50 @@ def check_source_routing_status(line: str, line_num: int, context: ConfigContext
 
 
 def check_proxy_arp_status(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """N-32: Proxy ARP 차단 - 논리 기반 분석"""
+    """N-32: Proxy ARP 차단 - 기본값 고려 개선된 버전"""
     vulnerabilities = []
     
-    # Proxy ARP 설정 확인
     for interface_name, interface_config in context.parsed_interfaces.items():
-        proxy_arp_disabled = False
+        # 물리 인터페이스만 체크
+        if interface_config['port_type'] not in ['FastEthernet', 'GigabitEthernet', 'TenGigabitEthernet']:
+            continue
+            
+        # 루프백, 관리 인터페이스 제외
+        if interface_config.get('is_loopback') or interface_config.get('is_management'):
+            continue
+            
+        config_lines = interface_config.get('config_lines', [])
         
-        for config_line in interface_config.get('config_lines', []):
-            if 'no ip proxy-arp' in config_line:
-                proxy_arp_disabled = True
-                break
+        # 명시적 설정 확인
+        proxy_arp_explicitly_disabled = any('no ip proxy-arp' in line for line in config_lines)
+        proxy_arp_explicitly_enabled = any(
+            'ip proxy-arp' in line and not line.strip().startswith('no ') 
+            for line in config_lines
+        )
         
-        if not proxy_arp_disabled and interface_config['port_type'] in ['FastEthernet', 'GigabitEthernet']:
+        # 실제 상태 판단 (기본값 고려)
+        if proxy_arp_explicitly_disabled:
+            actual_state = False  # 비활성화됨
+        elif proxy_arp_explicitly_enabled:
+            actual_state = True   # 명시적 활성화
+        else:
+            # 기본값 적용: Cisco는 기본적으로 proxy-arp enabled
+            actual_state = context.get_service_state('proxy_arp')
+        
+        # 보안 기준: proxy-arp는 비활성화되어야 함
+        if actual_state:  # 활성화된 경우 취약
+            status = "explicitly_enabled" if proxy_arp_explicitly_enabled else "default_enabled"
+            
             vulnerabilities.append({
                 'line': interface_config['line_number'],
                 'matched_text': f"interface {interface_name}",
                 'details': {
-                    'vulnerability': 'proxy_arp_not_disabled',
+                    'vulnerability': 'proxy_arp_enabled',
                     'interface_name': interface_name,
-                    'recommendation': 'Disable proxy ARP: no ip proxy-arp'
+                    'status': status,
+                    'recommendation': 'Add: no ip proxy-arp' if status == "default_enabled" 
+                                    else 'Change to: no ip proxy-arp',
+                    'default_behavior': 'Cisco default: proxy-arp enabled'
                 }
             })
     
@@ -1107,26 +1221,47 @@ def check_pad_service_status(line: str, line_num: int, context: ConfigContext) -
 
 
 def check_mask_reply_status(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """N-37: mask-reply 차단 - 논리 기반 분석"""
+    """N-37: mask-reply 차단 - 기본값 고려 개선된 버전"""
     vulnerabilities = []
     
-    # Mask reply 설정 확인
     for interface_name, interface_config in context.parsed_interfaces.items():
-        mask_reply_disabled = False
+        # 물리 인터페이스만 체크
+        if interface_config['port_type'] not in ['FastEthernet', 'GigabitEthernet', 'TenGigabitEthernet']:
+            continue
+            
+        config_lines = interface_config.get('config_lines', [])
         
-        for config_line in interface_config.get('config_lines', []):
-            if 'no ip mask-reply' in config_line:
-                mask_reply_disabled = True
-                break
+        # 명시적 설정 확인
+        mask_reply_explicitly_disabled = any('no ip mask-reply' in line for line in config_lines)
+        mask_reply_explicitly_enabled = any(
+            'ip mask-reply' in line and not line.strip().startswith('no ')
+            for line in config_lines
+        )
         
-        if not mask_reply_disabled and interface_config['port_type'] in ['FastEthernet', 'GigabitEthernet']:
+        # 실제 상태 판단 (버전별 기본값 고려)
+        if mask_reply_explicitly_disabled:
+            actual_state = False
+        elif mask_reply_explicitly_enabled:
+            actual_state = True
+        else:
+            # 기본값 적용 (버전별 차이 고려)
+            actual_state = context.get_service_state('mask_reply')
+        
+        # 보안 기준: mask-reply는 비활성화되어야 함
+        if actual_state:  # 활성화된 경우 취약
+            status = "explicitly_enabled" if mask_reply_explicitly_enabled else "default_enabled"
+            
             vulnerabilities.append({
                 'line': interface_config['line_number'],
                 'matched_text': f"interface {interface_name}",
                 'details': {
-                    'vulnerability': 'mask_reply_not_disabled',
+                    'vulnerability': 'mask_reply_enabled',
                     'interface_name': interface_name,
-                    'recommendation': 'Disable mask reply: no ip mask-reply'
+                    'status': status,
+                    'recommendation': 'Add: no ip mask-reply' if status == "default_enabled"
+                                    else 'Change to: no ip mask-reply',
+                    'ios_version': context.ios_version,
+                    'default_behavior': f'IOS {context.ios_version}: mask-reply default {"enabled" if actual_state else "disabled"}'
                 }
             })
     
@@ -1168,6 +1303,7 @@ def check_switch_hub_security(line: str, line_num: int, context: ConfigContext) 
         })
     
     return vulnerabilities
+
 
 def _is_critical_interface(interface_name: str, device_type: str) -> bool:
     """중요 인터페이스 여부 판별 - 강화된 버전"""

@@ -11,6 +11,7 @@ import re
 from dataclasses import dataclass, field
 from typing import List, Dict, Pattern, Callable, Optional, Any, Tuple
 from enum import Enum
+from .cisco_defaults import CiscoDefaults
 
 
 class RuleCategory(Enum):
@@ -35,6 +36,38 @@ class ConfigContext:
     vty_lines: List[Dict[str, Any]] = field(default_factory=list)
     snmp_communities: List[Dict[str, Any]] = field(default_factory=list)
     access_lists: Dict[str, List[str]] = field(default_factory=dict)
+    
+    def __post_init__(self):
+        """초기화 후 처리 - IOS 버전 감지 추가"""
+        if not hasattr(self, 'ios_version'):
+            self.ios_version = self._detect_ios_version()
+        if not hasattr(self, 'cisco_defaults'):
+            self.cisco_defaults = CiscoDefaults()
+    
+    def _detect_ios_version(self) -> Optional[str]:
+        """IOS 버전 감지"""
+        for line in self.config_lines:
+            if line.startswith('version '):
+                return line.split('version ', 1)[1].strip()
+            elif 'IOS Software' in line:
+                # show version 출력에서 버전 추출
+                version_match = re.search(r'Version (\d+\.\d+)', line)
+                if version_match:
+                    return version_match.group(1)
+        return None
+    
+    def get_service_state(self, service_name: str, explicit_config: Optional[bool] = None) -> bool:
+        """
+        서비스의 실제 상태 반환 (기본값 고려)
+        
+        Args:
+            service_name: 서비스명
+            explicit_config: 명시적 설정 (None이면 기본값 사용)
+        """
+        if explicit_config is not None:
+            return explicit_config
+        
+        return self.cisco_defaults.get_default_value(service_name, self.ios_version)
 
 
 @dataclass 

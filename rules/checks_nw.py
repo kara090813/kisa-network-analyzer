@@ -972,11 +972,90 @@ def check_nw_20(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
 
 
 def check_nw_21(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """NW-21: Spoofing 방지 필터링 - 기존 ACL 인식 개선"""
+    """NW-21: Spoofing 방지 필터링 - 환경별 차별화 개선된 버전"""
     vulnerabilities = []
     
-    # ACL 내용 분석
-    config_lines = context.full_config.split('\n')
+    # 네트워크 환경 분석
+    network_analysis = _analyze_network_environment(context)
+    
+    # 외부 연결이 없는 내부 전용 네트워크는 낮은 우선순위
+    if not network_analysis['has_external_connection']:
+        # 내부 전용 네트워크에서는 정보성 메시지만
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': 'Internal network - Spoofing protection optional',
+            'details': {
+                'vulnerability': 'spoofing_protection_info',
+                'network_type': 'internal_only',
+                'recommendation': 'Consider spoofing protection for security best practices',
+                'severity_adjusted': 'Info',
+                'external_interfaces': network_analysis['external_interfaces']
+            }
+        })
+        return vulnerabilities
+    
+    # ACL 내용 분석 (기존 로직 유지하되 개선)
+    acl_protections = _analyze_spoofing_protection_acls(context)
+    protection_count = sum(acl_protections.values())
+    
+    # 외부 인터페이스가 있는데 보호가 부족한 경우만 보고
+    if protection_count < 3:  # 기본적인 보호 수준
+        missing = [k for k, v in acl_protections.items() if not v]
+        
+        severity = 'High' if protection_count == 0 else 'Medium'
+        
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': 'Spoofing protection insufficient for external-facing network',
+            'details': {
+                'vulnerability': 'insufficient_spoofing_protection',
+                'network_type': 'external_facing',
+                'protection_level': protection_count,
+                'missing_protections': missing,
+                'external_interfaces': network_analysis['external_interfaces'],
+                'recommendation': 'Implement spoofing protection ACLs for: ' + ', '.join(missing),
+                'severity_adjusted': severity
+            }
+        })
+    
+    return vulnerabilities
+
+
+def _analyze_network_environment(context: ConfigContext) -> Dict[str, Any]:
+    """네트워크 환경 분석"""
+    external_interfaces = []
+    has_nat = False
+    has_public_ip = False
+    
+    for interface_name, interface_config in context.parsed_interfaces.items():
+        # NAT outside 인터페이스 확인
+        config_lines = interface_config.get('config_lines', [])
+        if any('nat outside' in line for line in config_lines):
+            external_interfaces.append(interface_name)
+            has_nat = True
+        
+        # 공인 IP 확인
+        ip_address = interface_config.get('ip_address', '')
+        if ip_address and not _is_private_ip(ip_address):
+            external_interfaces.append(interface_name)
+            has_public_ip = True
+        
+        # 설명 기반 외부 인터페이스 판단
+        description = interface_config.get('description', '').lower()
+        external_keywords = ['isp', 'internet', 'wan', 'external', 'outside', 'uplink']
+        if any(keyword in description for keyword in external_keywords):
+            external_interfaces.append(interface_name)
+    
+    return {
+        'has_external_connection': len(external_interfaces) > 0,
+        'external_interfaces': list(set(external_interfaces)),
+        'has_nat': has_nat,
+        'has_public_ip': has_public_ip
+    }
+
+
+def _analyze_spoofing_protection_acls(context: ConfigContext) -> Dict[str, bool]:
+    """스푸핑 방지 ACL 분석"""
     acl_protections = {
         'private_ranges': False,
         'loopback': False,
@@ -985,66 +1064,53 @@ def check_nw_21(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
         'bogons': False
     }
     
-    # 모든 ACL 검사
-    for i, line in enumerate(config_lines):
-        line_lower = line.lower().strip()
-        
-        # Private IP 차단 확인
-        if 'deny' in line_lower:
-            if any(ip in line for ip in ['10.0.0.0', '172.16.0.0', '192.168.0.0']):
-                acl_protections['private_ranges'] = True
-            if '127.0.0.0' in line or '127.0.0.1' in line:
-                acl_protections['loopback'] = True
-            if re.search(r'22[4-9]\.|23[0-9]\.', line):
-                acl_protections['multicast'] = True
-            if '.255' in line and 'deny' in line_lower:
-                acl_protections['broadcast'] = True
-            if any(ip in line for ip in ['0.0.0.0/8', '169.254.0.0']):
-                acl_protections['bogons'] = True
+    config_text = context.full_config.lower()
     
-    # 인터페이스에 ACL 적용 확인
-    applied_acls = []
-    for interface_name, interface_config in context.parsed_interfaces.items():
-        config_lines = interface_config.get('config_lines', [])
-        for line in config_lines:
-            if 'access-group' in line:
-                applied_acls.append(interface_name)
+    # Private IP 차단 확인
+    private_patterns = [
+        r'deny.*ip.*10\.0\.0\.0.*0\.255\.255\.255',
+        r'deny.*ip.*172\.1[6-9]\.0\.0',
+        r'deny.*ip.*172\.2[0-9]\.0\.0',
+        r'deny.*ip.*172\.3[0-1]\.0\.0',
+        r'deny.*ip.*192\.168\.0\.0.*0\.0\.255\.255'
+    ]
     
-    # 보호 수준 평가
-    protection_count = sum(acl_protections.values())
+    if any(re.search(pattern, config_text) for pattern in private_patterns):
+        acl_protections['private_ranges'] = True
     
-    # 기본적인 보호가 있는지 확인
-    has_basic_protection = (
-        acl_protections['private_ranges'] or 
-        len(applied_acls) > 0
-    )
+    # 루프백 차단 확인
+    if re.search(r'deny.*ip.*127\.0\.0\.0', config_text):
+        acl_protections['loopback'] = True
     
-    # 외부 인터페이스 확인
-    external_interfaces = []
-    for name, config in context.parsed_interfaces.items():
-        desc = config.get('description', '').lower()
-        if any(word in desc for word in ['isp', 'internet', 'wan', 'external']):
-            external_interfaces.append(name)
+    # 멀티캐스트 차단 확인  
+    if re.search(r'deny.*ip.*22[4-9]\.|deny.*ip.*23[0-9]\.', config_text):
+        acl_protections['multicast'] = True
     
-    # 외부 인터페이스가 있는데 보호가 부족한 경우만 보고
-    if external_interfaces and protection_count < 3:
-        missing = [k for k, v in acl_protections.items() if not v]
-        
-        vulnerabilities.append({
-            'line': 0,
-            'matched_text': 'Spoofing protection could be enhanced',
-            'details': {
-                'vulnerability': 'incomplete_spoofing_protection',
-                'protection_level': protection_count,
-                'missing_protections': missing,
-                'external_interfaces': external_interfaces,
-                'applied_acls': applied_acls,
-                'recommendation': 'Consider adding ACLs for: ' + ', '.join(missing),
-                'severity_adjusted': 'Low' if protection_count >= 2 else 'Medium'
-            }
-        })
+    # 브로드캐스트 차단 확인
+    if re.search(r'deny.*ip.*\.255', config_text):
+        acl_protections['broadcast'] = True
     
-    return vulnerabilities
+    # Bogon 네트워크 차단 확인
+    bogon_patterns = [
+        r'deny.*ip.*0\.0\.0\.0',
+        r'deny.*ip.*169\.254\.0\.0'
+    ]
+    if any(re.search(pattern, config_text) for pattern in bogon_patterns):
+        acl_protections['bogons'] = True
+    
+    return acl_protections
+
+
+def _is_private_ip(ip_address: str) -> bool:
+    """사설 IP 대역 확인"""
+    if re.match(r'^10\.', ip_address):
+        return True
+    if re.match(r'^172\.(1[6-9]|2[0-9]|3[0-1])\.', ip_address):
+        return True
+    if re.match(r'^192\.168\.', ip_address):
+        return True
+    return False
+
 
 
 def check_nw_22(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
