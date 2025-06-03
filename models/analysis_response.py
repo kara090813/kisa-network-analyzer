@@ -174,3 +174,43 @@ class AnalysisResponse:
             statistics=self.statistics,
             timestamp=self.timestamp
         )
+    
+def calculate_consolidated_statistics(vulnerabilities: List[VulnerabilityIssue]) -> Dict[str, int]:
+    """
+    통합된 통계 계산 - 룰별로 1개씩만 카운트
+    """
+    
+    # 룰별로 그룹화
+    rule_groups = {}
+    for vuln in vulnerabilities:
+        rule_id = vuln.rule_id
+        if rule_id not in rule_groups:
+            rule_groups[rule_id] = []
+        rule_groups[rule_id].append(vuln)
+    
+    # 룰별 대표 취약점 선택 (가장 높은 심각도)
+    severity_order = {'상': 3, 'High': 3, '중': 2, 'Medium': 2, '하': 1, 'Low': 1}
+    
+    consolidated_vulnerabilities = []
+    for rule_id, rule_vulns in rule_groups.items():
+        # 가장 높은 심각도의 취약점을 대표로 선택
+        primary_vuln = max(rule_vulns, 
+                          key=lambda v: severity_order.get(v.severity, 0))
+        consolidated_vulnerabilities.append(primary_vuln)
+    
+    # 통계 계산
+    total_rules = len(consolidated_vulnerabilities)
+    severity_counts = {'상': 0, 'High': 0, '중': 0, 'Medium': 0, '하': 0, 'Low': 0}
+    
+    for vuln in consolidated_vulnerabilities:
+        if vuln.severity in severity_counts:
+            severity_counts[vuln.severity] += 1
+    
+    return {
+        'total_vulnerabilities': total_rules,
+        'high_severity': severity_counts['상'] + severity_counts['High'],
+        'medium_severity': severity_counts['중'] + severity_counts['Medium'],
+        'low_severity': severity_counts['하'] + severity_counts['Low']
+    }
+    
+    
