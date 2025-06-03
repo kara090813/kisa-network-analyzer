@@ -1115,7 +1115,7 @@ def check_mask_reply_status(line: str, line_num: int, context: ConfigContext) ->
         mask_reply_disabled = False
         
         for config_line in interface_config.get('config_lines', []):
-            if 'ip mask-reply' in config_line:
+            if 'no ip mask-reply' in config_line:
                 mask_reply_disabled = True
                 break
         
@@ -1124,9 +1124,9 @@ def check_mask_reply_status(line: str, line_num: int, context: ConfigContext) ->
                 'line': interface_config['line_number'],
                 'matched_text': f"interface {interface_name}",
                 'details': {
-                    'vulnerability': 'mask_reply_abled',
+                    'vulnerability': 'mask_reply_not_disabled',
                     'interface_name': interface_name,
-                    'recommendation': 'Disable mask reply: ip mask-reply'
+                    'recommendation': 'Disable mask reply: no ip mask-reply'
                 }
             })
     

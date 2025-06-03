@@ -767,12 +767,8 @@ NW_RULES = {
         description="mask-reply를 차단하지 않을 경우 비인가자에게 내부 서브 네트워크의 서브넷 마스크 정보가 노출될 수 있음",
         severity="중",
         category=RuleCategory.FUNCTION_MANAGEMENT,
-        patterns=[
-            r"ip\s+mask-reply"
-        ],
-        negative_patterns=[
-            r"no\s+ip\s+mask-reply"
-        ],
+        patterns=[],
+        negative_patterns=[],
         device_types=["Cisco"],
         recommendation="각 인터페이스에서 no ip mask-reply 설정(기본 비활성)",
         reference="NW 가이드 NW-37 (중) mask-reply 차단",

@@ -1530,21 +1530,21 @@ def check_nw_37(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
     
     # Mask reply 설정 확인
     for interface_name, interface_config in context.parsed_interfaces.items():
-        mask_reply_disabled = False
+        mask_reply_enabled = False
         
         for config_line in interface_config.get('config_lines', []):
             if 'ip mask-reply' in config_line:
-                mask_reply_disabled = True
+                mask_reply_enabled = True
                 break
         
-        if not mask_reply_disabled and interface_config['port_type'] in ['FastEthernet', 'GigabitEthernet']:
+        if not mask_reply_enabled and interface_config['port_type'] in ['FastEthernet', 'GigabitEthernet']:
             vulnerabilities.append({
                 'line': interface_config['line_number'],
                 'matched_text': f"interface {interface_name}",
                 'details': {
-                    'vulnerability': 'mask_reply_abled',
+                    'vulnerability': 'mask_reply_enabled',
                     'interface_name': interface_name,
-                    'recommendation': 'Disable mask reply: ip mask-reply'
+                    'recommendation': 'Disable mask reply: no ip mask-reply'
                 }
             })
     
