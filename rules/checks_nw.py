@@ -1537,7 +1537,7 @@ def check_nw_37(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
                 mask_reply_enabled = True
                 break
         
-        if not mask_reply_enabled and interface_config['port_type'] in ['FastEthernet', 'GigabitEthernet']:
+        if mask_reply_enabled and interface_config['port_type'] in ['FastEthernet', 'GigabitEthernet']:
             vulnerabilities.append({
                 'line': interface_config['line_number'],
                 'matched_text': f"interface {interface_name}",
