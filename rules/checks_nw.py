@@ -386,7 +386,7 @@ def _is_critical_interface_nw(interface_name: str, device_type: str) -> bool:
 
 def check_nw_11(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """NW-11: 원격 로그서버 사용 - 논리 기반 분석"""
-    vulnerabilities = []
+    vulnerabilities = [] 
     
     # 원격 로그 서버 설정 확인
     has_remote_logging = any([
