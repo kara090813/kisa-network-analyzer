@@ -15,7 +15,7 @@ SUPPORTED_SOURCES = {
     "KISA": {
         "name": "KISA 네트워크 장비 보안 가이드",
         "description": "한국인터넷진흥원(KISA) 네트워크 장비 보안 점검 가이드라인",
-        "version": "2024",
+        "version": "2021",
         "total_rules": 38,
         "categories": ["계정 관리", "접근 관리", "패치 관리", "로그 관리", "기능 관리"]
     },
@@ -23,13 +23,13 @@ SUPPORTED_SOURCES = {
         "name": "CIS Controls",
         "description": "Center for Internet Security Controls",
         "version": "v8",
-        "total_rules": 11,
+        "total_rules": 89,
         "categories": ["계정 관리", "접근 관리", "로그 관리"]
     },
     "NW": {
         "name": "NW 네트워크 장비 보안 가이드",
         "description": "NW 네트워크 장비 보안 점검 가이드라인",
-        "version": "2024",
+        "version": "2025",
         "total_rules": 42,
         "categories": ["계정 관리", "접근 관리", "패치 관리", "로그 관리", "기능 관리"]
     },
