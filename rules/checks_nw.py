@@ -544,20 +544,123 @@ def _check_console_port_security_nw08(context: ConfigContext) -> List[Dict[str, 
     return issues
 
 
+def _check_console_port_security_nw08(context: ConfigContext) -> List[Dict[str, Any]]:
+    """Console 포트 보안 설정 확인 (NW-08 전용)"""
+    issues = []
+    
+    # Console 라인 설정 찾기
+    config_lines = context.config_lines
+    console_line_found = False
+    console_line_number = 0
+    console_config = {
+        'has_password': False,
+        'has_login': False,
+        'exec_timeout': None,
+        'has_logging_sync': False
+    }
+    
+    in_console_section = False
+    
+    for i, line in enumerate(config_lines):
+        line_clean = line.strip()
+        original_line = line
+        
+        # Console 라인 시작 (line con 0 또는 line console 0)
+        if line_clean.startswith('line con') or line_clean.startswith('line console'):
+            console_line_found = True
+            console_line_number = i + 1
+            in_console_section = True
+            continue
+            
+        # Console 섹션 내부 설정
+        elif in_console_section and original_line.startswith(' '):
+            if 'password' in line_clean:
+                console_config['has_password'] = True
+            elif line_clean in ['login', 'login local']:
+                console_config['has_login'] = True
+            elif 'exec-timeout' in line_clean:
+                # exec-timeout 값 파싱
+                parts = line_clean.split()
+                if len(parts) >= 2:
+                    try:
+                        minutes = int(parts[1])
+                        seconds = int(parts[2]) if len(parts) > 2 else 0
+                        console_config['exec_timeout'] = minutes * 60 + seconds
+                    except:
+                        pass
+            elif 'logging synchronous' in line_clean:
+                console_config['has_logging_sync'] = True
+                
+        # 다른 섹션 시작하면 Console 섹션 종료
+        elif in_console_section and not original_line.startswith(' ') and line_clean:
+            in_console_section = False
+    
+    if console_line_found:
+        # Console 포트 보안 권고사항 확인
+        recommendations = []
+        
+        # 패스워드가 없는 경우
+        if not console_config['has_password']:
+            recommendations.append('set_console_password')
+            
+        # 로그인 설정이 없는 경우
+        if not console_config['has_login']:
+            recommendations.append('configure_login')
+            
+        # 무제한 타임아웃인 경우
+        if console_config['exec_timeout'] == 0:
+            recommendations.append('set_exec_timeout')
+            
+        # 로깅 동기화가 없는 경우 (보안과 직접 관련은 없지만 권고)
+        if not console_config['has_logging_sync']:
+            recommendations.append('enable_logging_sync')
+        
+        # 심각한 보안 문제만 보고 (패스워드나 로그인이 없는 경우)
+        critical_issues = [r for r in recommendations if r in ['set_console_password', 'configure_login']]
+        
+        if critical_issues:
+            issues.append({
+                'line': console_line_number,
+                'matched_text': 'line con 0 (security recommendations)',
+                'details': {
+                    'port_type': 'console',
+                    'vulnerability': 'console_port_security_recommendations',
+                    'critical_issues': critical_issues,
+                    'all_recommendations': recommendations,
+                    'current_config': console_config,
+                    'recommendation': 'Secure console port with password and login configuration',
+                    'severity_adjusted': 'Medium' if 'set_console_password' in critical_issues else 'Low'
+                }
+            })
+    
+    return issues
+
+
 def check_nw_09(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """NW-09: 로그온 시 경고 메시지 설정 - 논리 기반 분석"""
+    """NW-09: 로그온 시 경고 메시지 설정 - 수정된 버전"""
     vulnerabilities = []
     
-    # 배너 메시지 설정 확인
-    has_banner = any(line.strip().startswith('banner') for line in context.config_lines)
+    # 다양한 배너 타입 확인
+    banner_found = False
+    banner_types = ['motd', 'login', 'exec', 'incoming']
     
-    if not has_banner:
+    for line in context.config_lines:
+        line_clean = line.strip()
+        if line_clean.startswith('banner '):
+            parts = line_clean.split()
+            if len(parts) >= 2 and parts[1] in banner_types:
+                banner_found = True
+                break
+    
+    if not banner_found:
         vulnerabilities.append({
             'line': 0,
             'matched_text': 'No login banner configured',
             'details': {
                 'vulnerability': 'no_login_banner',
-                'recommendation': 'Configure login banner message for unauthorized access warning'
+                'banner_types_checked': banner_types,
+                'recommendation': 'Configure banner motd or banner login for unauthorized access warning',
+                'security_impact': 'Lack of warning message may encourage unauthorized access attempts'
             }
         })
     
@@ -622,32 +725,47 @@ def check_nw_12(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
     
     # 로깅 버퍼 크기 확인
     buffer_size = None
+    buffer_line_num = 0
     
-    for line in context.config_lines:
+    for i, line in enumerate(context.config_lines):
         match = re.match(r'^logging\s+buffered\s+(\d+)', line.strip())
         if match:
             buffer_size = int(match.group(1))
+            buffer_line_num = i + 1
             break
     
-    if buffer_size is None:
-        vulnerabilities.append({
-            'line': 0,
-            'matched_text': 'Logging buffer size not configured',
-            'details': {
-                'vulnerability': 'no_logging_buffer_size',
-                'recommendation': 'Configure appropriate logging buffer size (16000-32000 bytes)'
-            }
-        })
-    elif buffer_size < 16000:
-        vulnerabilities.append({
-            'line': 0,
-            'matched_text': f'Logging buffer size too small ({buffer_size})',
-            'details': {
-                'vulnerability': 'insufficient_logging_buffer_size',
-                'current_size': buffer_size,
-                'recommendation': 'Increase logging buffer size to at least 16000 bytes'
-            }
-        })
+    # 로깅이 활성화되어 있는지 확인
+    logging_enabled = any([
+        'logging' in line and not line.strip().startswith('!')
+        for line in context.config_lines
+    ])
+    
+    if logging_enabled:
+        if buffer_size is None:
+            # 버퍼 크기가 명시되지 않음 (기본값 사용)
+            vulnerabilities.append({
+                'line': 0,
+                'matched_text': 'Logging buffer size not explicitly configured',
+                'details': {
+                    'vulnerability': 'no_explicit_logging_buffer_size',
+                    'current_status': 'using_default_size',
+                    'recommendation': 'Configure explicit logging buffer size (16384-32768 bytes recommended)',
+                    'severity_adjusted': 'Medium'
+                }
+            })
+        elif buffer_size < 16384:  # 16KB 미만
+            # 버퍼 크기가 너무 작음
+            vulnerabilities.append({
+                'line': buffer_line_num,
+                'matched_text': f'logging buffered {buffer_size}',
+                'details': {
+                    'vulnerability': 'insufficient_logging_buffer_size',
+                    'current_size': buffer_size,
+                    'recommended_minimum': 16384,
+                    'recommendation': 'Increase logging buffer size to at least 16KB',
+                    'severity_adjusted': 'Medium'
+                }
+            })
     
     return vulnerabilities
 

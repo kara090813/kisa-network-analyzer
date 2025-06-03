@@ -23,17 +23,38 @@ from .checks_nw import (
     check_nw_04,
     check_nw_05,
     check_nw_06,
+    check_nw_07,  # ← 추가 필요
     check_nw_08,
+    check_nw_09,  # ← 추가 필요
     check_nw_11,
+    check_nw_12,  # ← 추가 필요
+    check_nw_13,  # ← 추가 필요
     check_nw_14,
+    check_nw_15,  # ← 추가 필요
     check_nw_16,
     check_nw_17,
     check_nw_18,
     check_nw_19,
+    check_nw_20,  # ← 추가 필요
     check_nw_21,
+    check_nw_22,  # ← 추가 필요
     check_nw_23,
+    check_nw_24,  # ← 추가 필요
+    check_nw_25,  # ← 추가 필요
+    check_nw_26,  # ← 추가 필요
+    check_nw_27,  # ← 추가 필요
+    check_nw_28,  # ← 추가 필요
+    check_nw_29,  # ← 추가 필요
+    check_nw_30,  # ← 추가 필요
+    check_nw_31,  # ← 추가 필요
+    check_nw_32,  # ← 추가 필요
     check_nw_33,
+    check_nw_34,  # ← 추가 필요
+    check_nw_35,  # ← 추가 필요
+    check_nw_36,  # ← 추가 필요
+    check_nw_37,  # ← 추가 필요
     check_nw_38,
+    check_nw_39,  # ← 추가 필요
     check_nw_40,
     check_nw_41,
     check_nw_42
@@ -156,7 +177,7 @@ NW_RULES = {
     "NW-06": SecurityRule(
         rule_id="NW-06",
         title="Session Timeout 설정",
-        description="Session Timeout 정책이 적용되지 않았을 경우, 관리자 부재 시 비인가자가 네트워크 장비 터미널에 접속된 컴퓨터를 통해 네트워크 장비의 정책 변경 및 삭제 등의 행위를 할 수 있는 위험이 존재한다",
+        description="Session Timeout 정책이 적용되지 않았거나 설정 시간이 너무 긴 경우, 비인가자가 네트워크 장비 터미널에 접속된 컴퓨터를 통해 네트워크 장비의 정책 변경 및 삭제 등의 행위를 할 수 있는 위험이 존재한다",
         severity="상",
         category=RuleCategory.ACCESS_MANAGEMENT,
         patterns=[
@@ -189,6 +210,7 @@ NW_RULES = {
         device_types=["Cisco", "Radware", "Juniper", "Piolink", "HP", "Alcatel", "Extreme", "Dasan"],
         recommendation="네트워크 장비에서 암호화 통신인 암호화 방식의 원격접속 서비스(SSH 등)를 활용한다",
         reference="NW 가이드 NW-07 (중) VTY 접속 시 안전한 프로토콜 사용",
+        logical_check_function = check_nw_07,
     ),
     
     # ======================= 기능 관리 =======================
@@ -225,6 +247,7 @@ NW_RULES = {
         device_types=["Cisco", "Radware", "Juniper", "Piolink", "HP", "Alcatel", "Dasan"],
         recommendation="네트워크 장비 접속 시 경고 메시지가 출력되도록 설정한다",
         reference="NW 가이드 NW-09 (중) 로그온 시 경고 메시지 설정",
+        logical_check_function = check_nw_09,
     ),
     
     "NW-10": SecurityRule(
@@ -276,6 +299,7 @@ NW_RULES = {
         device_types=["Cisco", "Piolink", "HP", "Alcatel"],
         recommendation="로그저장 장치의 크기를 고려하여 버퍼 크기를 설정하고 2년 이상 보관한다",
         reference="NW 가이드 NW-12 (중) 로깅 버퍼 크기 설정",
+        logical_check_function = check_nw_12,
     ),
     
     "NW-13": SecurityRule(
@@ -293,6 +317,7 @@ NW_RULES = {
         device_types=["Cisco", "Juniper", "Piolink"],
         recommendation="로그 기록 정책을 수립하고 정책에 따른 로깅 설정을 한다",
         reference="NW 가이드 NW-13 (중) 정책에 따른 로깅 설정",
+        logical_check_function = check_nw_13,
     ),
     
     "NW-14": SecurityRule(
@@ -327,6 +352,7 @@ NW_RULES = {
         device_types=["Cisco", "HP", "Alcatel", "Piolink", "Extreme", "Dasan"],
         recommendation="Timestamp 로그를 설정한다",
         reference="NW 가이드 NW-15 (중) Timestamp 로그 설정",
+        logical_check_function = check_nw_15,
     ),
     
     # ======================= SNMP 관리 =======================
@@ -425,6 +451,7 @@ NW_RULES = {
         device_types=["Cisco"],
         recommendation="네트워크 장비의 TFTP 서비스가 비활성화되도록 설정한다(필요시에만 활성화)",
         reference="NW 가이드 NW-20 (중) TFTP 서비스 차단",
+        logical_check_function = check_nw_20,
     ),
     
     # ======================= 보안 방어 =======================
@@ -471,6 +498,7 @@ NW_RULES = {
         device_types=["Cisco", "Juniper"],
         recommendation="DDoS 공격 대응 설정을 한다",
         reference="NW 가이드 NW-22 (중) DDoS 공격 방어 설정 또는 DDoS 대응 장비 사용",
+        logical_check_function = check_nw_22,
     ),
     
     "NW-23": SecurityRule(
@@ -504,6 +532,7 @@ NW_RULES = {
         device_types=["Cisco"],
         recommendation="사용되지 않은 터미널 삭제 및 원격에서의 동일한 터미널 접속을 방지하기 위해 TCP keepalive 서비스를 사용한다",
         reference="NW 가이드 NW-24 (중) TCP keepalive 서비스 설정",
+        logical_check_function = check_nw_24,
     ),
     
     # ======================= 불필요한 서비스 차단 =======================
@@ -524,6 +553,7 @@ NW_RULES = {
         device_types=["Cisco", "Juniper"],
         recommendation="finger 서비스는 임의의 사용자가 장비에 접속한 유저명, IP 등 민감한 정보를 얻을 수 있으므로 제거한다",
         reference="NW 가이드 NW-25 (중) Finger 서비스 차단",
+        logical_check_function = check_nw_25,
     ),
     
     "NW-26": SecurityRule(
@@ -542,6 +572,7 @@ NW_RULES = {
         device_types=["Cisco", "Radware", "Juniper", "Piolink", "HP", "Alcatel"],
         recommendation="관리상 불필요한 웹서비스를 제거한다",
         reference="NW 가이드 NW-26 (중) 웹 서비스 차단",
+        logical_check_function = check_nw_26,
     ),
     
     "NW-27": SecurityRule(
@@ -561,6 +592,7 @@ NW_RULES = {
         device_types=["Cisco"],
         recommendation="DoS 공격에 악용될 수 있는 서비스(echo, discard, daytime, chargen)를 제거한다",
         reference="NW 가이드 NW-27 (중) TCP/UDP Small 서비스 차단",
+        logical_check_function = check_nw_27,
     ),
     
     "NW-28": SecurityRule(
@@ -579,6 +611,7 @@ NW_RULES = {
         device_types=["Cisco", "Radware", "Juniper"],
         recommendation="장비별 Bootp 서비스 제한 설정을 한다",
         reference="NW 가이드 NW-28 (중) Bootp 서비스 차단",
+        logical_check_function = check_nw_28,
     ),
     
     "NW-29": SecurityRule(
@@ -597,6 +630,7 @@ NW_RULES = {
         device_types=["Cisco"],
         recommendation="Cisco 전용 프로토콜로 Neighbor 장비들의 정보를 획득할 수 있는 CDP를 사용하지 않는다",
         reference="NW 가이드 NW-29 (중) CDP 서비스 차단",
+        logical_check_function = check_nw_29,
     ),
     
     "NW-30": SecurityRule(
@@ -614,6 +648,7 @@ NW_RULES = {
         device_types=["Cisco", "Juniper", "Radware", "Passport", "Alcatel"],
         recommendation="각 인터페이스에서 no ip directed-broadcast 설정",
         reference="NW 가이드 NW-30 (중) Directed-broadcast 차단",
+        logical_check_function = check_nw_30,
     ),
 
     "NW-31": SecurityRule(
@@ -631,6 +666,7 @@ NW_RULES = {
         device_types=["Cisco", "Juniper"],
         recommendation="각 인터페이스에서 no ip source-route 설정",
         reference="NW 가이드 NW-31 (중) Source 라우팅 차단",
+        logical_check_function = check_nw_31,
     ),
 
     "NW-32": SecurityRule(
@@ -648,6 +684,7 @@ NW_RULES = {
         device_types=["Cisco", "Juniper", "Piolink", "Alcatel"],
         recommendation="각 인터페이스에서 no ip proxy-arp 설정",
         reference="NW 가이드 NW-32 (중) Proxy ARP 차단",
+        logical_check_function = check_nw_32,
     ),
 
     "NW-33": SecurityRule(
@@ -685,6 +722,7 @@ NW_RULES = {
         device_types=["Cisco"],
         recommendation="no ip identd 설정으로 identd 서비스 비활성화",
         reference="NW 가이드 NW-34 (중) identd 서비스 차단",
+        logical_check_function = check_nw_34,
     ),
 
     "NW-35": SecurityRule(
@@ -702,6 +740,7 @@ NW_RULES = {
         device_types=["Cisco"],
         recommendation="no ip domain-lookup 설정으로 Domain lookup 기능 비활성화",
         reference="NW 가이드 NW-35 (중) Domain lookup 차단",
+        logical_check_function = check_nw_35,
     ),
 
     "NW-36": SecurityRule(
@@ -719,6 +758,7 @@ NW_RULES = {
         device_types=["Cisco"],
         recommendation="no service pad 설정으로 PAD 서비스 비활성화",
         reference="NW 가이드 NW-36 (중) PAD 차단",
+        logical_check_function = check_nw_36,
     ),
 
     "NW-37": SecurityRule(
@@ -736,6 +776,7 @@ NW_RULES = {
         device_types=["Cisco"],
         recommendation="각 인터페이스에서 no ip mask-reply 설정",
         reference="NW 가이드 NW-37 (중) mask-reply 차단",
+        logical_check_function = check_nw_37,
     ),
 
     "NW-38": SecurityRule(
@@ -778,6 +819,7 @@ NW_RULES = {
         device_types=["Cisco"],
         recommendation="환경설정 원격 로딩 기능을 일반적으로 사용하지 않으므로 제거",
         reference="NW 가이드 NW-39 (중) 환경설정 원격 로딩",
+        logical_check_function = check_nw_39,
     ),
 
     "NW-40": SecurityRule(
