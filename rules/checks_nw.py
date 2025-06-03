@@ -275,7 +275,7 @@ def check_nw_05(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
                     'has_access_class': vty_line['has_access_class'],
                     'transport_input': transport_input,
                     'access_class': vty_line.get('access_class'),
-                    'recommendation': 'Configure access-class for VTY lines to restrict source IPs'
+                    'recommendation': 'VTY 라인에 access-class를 설정하여 접속 가능한 IP를 제한하세요.'
                 }
             }
             vulnerabilities.append(vulnerability_details)
@@ -297,7 +297,7 @@ def check_nw_06(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
                 'matched_text': vty_line['line'],
                 'details': {
                     'vulnerability': 'no_exec_timeout',
-                    'recommendation': 'Set exec-timeout 5 0 (5 minutes)'
+                    'recommendation': '입력 대기 시간이 5분이 되도록 exec-timeout 5 0을 설정하세요.'
                 }
             })
         elif exec_timeout == 0:
@@ -308,7 +308,7 @@ def check_nw_06(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
                 'details': {
                     'vulnerability': 'infinite_timeout',
                     'timeout_value': exec_timeout,
-                    'recommendation': 'Set exec-timeout 5 0 (5 minutes)'
+                    'recommendation': '입력 대기 시간이 5분이 되도록 exec-timeout 5 0을 설정하세요.'
                 }
             })
         elif exec_timeout > 300:  # 5분 초과
@@ -670,7 +670,7 @@ def check_nw_09(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
             'details': {
                 'vulnerability': 'no_login_banner',
                 'banner_types_checked': banner_types,
-                'recommendation': 'Configure banner motd or banner login for unauthorized access warning',
+                'recommendation': '무단 사용자를 경고하기 위해 MOTD 배너 또는 로그인 배너를 설정하십시오.',
                 'security_impact': 'Lack of warning message may encourage unauthorized access attempts',
                 'suggested_config': 'banner motd ^C\nUnauthorized access prohibited!\n^C',
                 'line_number': suggested_line
@@ -782,7 +782,7 @@ def check_nw_12(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
                 'details': {
                     'vulnerability': 'no_explicit_logging_buffer_size',
                     'current_status': 'using_default_size',
-                    'recommendation': 'Configure explicit logging buffer size (16384-32768 bytes recommended)',
+                    'recommendation': '로깅 버퍼 크기를 명시적으로 설정하세요. 권장 크기는 16,384바이트에서 32,768바이트 사이입니다.',
                     'severity_adjusted': 'Medium'
                 }
             })
@@ -857,7 +857,7 @@ def check_nw_14(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
             'matched_text': 'No NTP server configuration found',
             'details': {
                 'vulnerability': 'no_ntp_configuration',
-                'recommendation': 'Configure NTP server: ntp server x.x.x.x',
+                'recommendation': '정확한 시간 동기화를 위해 NTP(Network Time Protocol) 서버를 설정하세요.',
                 'suggested_config': 'ntp server pool.ntp.org  ! Replace with appropriate NTP server',
                 'line_number': suggested_line
             }
@@ -908,7 +908,7 @@ def check_nw_16(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
             'details': {
                 'vulnerability': 'snmp_service_enabled',
                 'snmp_communities': len(context.snmp_communities),
-                'recommendation': 'Disable SNMP service if not required for network management'
+                'recommendation': 'SNMP가 네트워크 운영에 필수적이지 않은 경우, 보안 강화를 위해 SNMP 서비스를 비활성화해야 합니다.'
             }
         })
     
@@ -952,7 +952,7 @@ def check_nw_17(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
                     'issues': issues,
                     'community_length': community_info['length'],
                     'is_default': community_info['is_default'],
-                    'recommendation': 'Use complex community string with minimum 8 characters, avoid default values'
+                    'recommendation': 'SNMP 커뮤니티 문자열은 기본값을 사용하지 말고, 최소 8자 이상의 복잡한 문자열로 설정하여 보안을 강화해야 합니다.'
                 }
             })
     
@@ -973,7 +973,7 @@ def check_nw_18(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
                     'community': community_info['community'],
                     'vulnerability': 'no_acl_configured',
                     'permission': community_info.get('permission', 'unknown'),
-                    'recommendation': 'Configure ACL to restrict SNMP access to authorized hosts only'
+                    'recommendation': 'ACL을 설정하여 SNMP 접근을 허용된 호스트로만 제한하세요.'
                 }
             })
     
@@ -1182,7 +1182,7 @@ def check_nw_22(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
             'matched_text': 'DDoS protection not configured',
             'details': {
                 'vulnerability': 'no_ddos_protection',
-                'recommendation': 'Configure DDoS protection features (TCP intercept, rate limiting, etc.)'
+                'recommendation': 'DDoS 보호 기능을 구성하세요 (예: TCP 인터셉트, 속도 제한 등).'
             }
         })
     
@@ -1299,7 +1299,7 @@ def check_nw_23(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
                         'is_used': is_used,
                         'config_block': config_block.strip()
                     },
-                    'recommendation': f'Configure "shutdown" on interface {interface_name}',
+                    'recommendation': f'사용하지 않는 인터페이스는 shutdown해주세요 : {interface_name}',
                     'line_number': line_number
                 }
             })
@@ -1540,7 +1540,7 @@ def check_nw_31(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
             'matched_text': 'Source routing not disabled',
             'details': {
                 'vulnerability': 'source_routing_enabled',
-                'recommendation': 'Disable source routing: no ip source-route'
+                'recommendation': '소스 라우팅 비활성화: no ip source-route 명령어를 설정하세요.'
             }
         })
     

@@ -245,7 +245,7 @@ def check_vty_access_control(line: str, line_num: int, context: ConfigContext) -
                     'has_access_class': vty_line['has_access_class'],
                     'transport_input': transport_input,
                     'access_class': vty_line.get('access_class'),
-                    'recommendation': 'Configure access-class for VTY lines to restrict source IPs'
+                    'recommendation': 'VTY 라인에 access-class를 설정하여 접속 가능한 IP를 제한하세요.'
                 }
             }
             vulnerabilities.append(vulnerability_details)
@@ -268,7 +268,7 @@ def check_session_timeout(line: str, line_num: int, context: ConfigContext) -> L
                 'matched_text': vty_line['line'],
                 'details': {
                     'vulnerability': 'no_exec_timeout',
-                    'recommendation': 'Set exec-timeout 5 0 (5 minutes)'
+                    'recommendation': '입력 대기 시간이 5분이 되도록 exec-timeout 5 0을 설정하세요.'
                 }
             })
         elif exec_timeout == 0:
@@ -279,7 +279,7 @@ def check_session_timeout(line: str, line_num: int, context: ConfigContext) -> L
                 'details': {
                     'vulnerability': 'infinite_timeout',
                     'timeout_value': exec_timeout,
-                    'recommendation': 'Set exec-timeout 5 0 (5 minutes)'
+                    'recommendation': '입력 대기 시간이 5분이 되도록 exec-timeout 5 0을 설정하세요.'
                 }
             })
         elif exec_timeout > 300:  # 5분 초과
@@ -498,7 +498,7 @@ def check_ddos_protection(line: str, line_num: int, context: ConfigContext) -> L
             'matched_text': 'DDoS protection not configured',
             'details': {
                 'vulnerability': 'no_ddos_protection',
-                'recommendation': 'Configure DDoS protection features (TCP intercept, rate limiting, etc.)'
+                'recommendation': 'DDoS 보호 기능을 구성하세요 (예: TCP 인터셉트, 속도 제한 등).'
             }
         })
     

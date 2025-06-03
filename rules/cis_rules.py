@@ -1554,7 +1554,7 @@ CIS_RULES = {
         r"no\s+ip\s+source-route"
     ],
     device_types=["Cisco"],
-    recommendation="Disable source routing: no ip source-route",
+    recommendation="소스 라우팅 비활성화: no ip source-route 명령어를 설정하세요.",
     reference="CIS Cisco IOS 12 Benchmark v4.0.0 - 3.1.1",
 ),
 

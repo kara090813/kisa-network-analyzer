@@ -502,7 +502,7 @@ def check_session_timeout(line: str, line_num: int, context: ConfigContext) -> L
                 'matched_text': vty_line['line'],
                 'details': {
                     'vulnerability': 'no_exec_timeout',
-                    'recommendation': 'Set exec-timeout 5 0 (5 minutes)'
+                    'recommendation': '입력 대기 시간이 5분이 되도록 exec-timeout 5 0을 설정하세요.'
                 }
             })
         elif exec_timeout == 0:
@@ -513,7 +513,7 @@ def check_session_timeout(line: str, line_num: int, context: ConfigContext) -> L
                 'details': {
                     'vulnerability': 'infinite_timeout',
                     'timeout_value': exec_timeout,
-                    'recommendation': 'Set exec-timeout 5 0 (5 minutes)'
+                    'recommendation': '입력 대기 시간이 5분이 되도록 exec-timeout 5 0을 설정하세요.'
                 }
             })
         elif exec_timeout > 300:  # 5분 초과
