@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-KISA 네트워크 장비 취약점 분석 API (Fixed Multi-Framework Version)
+KISA 네트워크 장비 취약점 분석 API (Enhanced Detailed Analysis Version)
 main.py - Flask 애플리케이션 메인 파일
 
-수정사항:
-- 실제 지침서 선택 기능 활성화
-- API 호출 시 framework 파라미터 처리
-- 기존 호환성 완전 유지
+🔥 개선사항:
+- 상세 정보 보존 (어느 인터페이스에 문제가 있는지 명확히 표시)
+- 정확한 라인 번호 제공
+- 통합 통계 옵션 제공
+- 개별 취약점과 통합 취약점 선택 가능
+- IOS 버전 정보를 장비 타입에 포함
 """
 
 import os
+import re
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import json
@@ -19,7 +22,7 @@ from datetime import datetime
 import traceback
 from typing import Dict, List, Any, Optional
 
-# 수정된 분석기 import
+# 🔥 개선된 분석기 import
 from analyzers.config_analyzer import MultiFrameworkAnalyzer
 from models.analysis_request import AnalysisRequest
 from models.analysis_response import AnalysisResponse
@@ -41,12 +44,12 @@ CORS(app)
 # 로깅 설정
 logger = setup_logger(__name__)
 
-# Multi-Framework Analyzer 인스턴스 생성
+# 🔥 개선된 Multi-Framework Analyzer 인스턴스 생성
 analyzer = MultiFrameworkAnalyzer()
 
 # API 버전 정보
-API_VERSION = "1.4.0"  # 실제 다중 지침서 지원으로 버전 업데이트
-ANALYSIS_ENGINE_VERSION = "Multi-Framework 1.1"
+API_VERSION = "1.4.0"  # 상세 정보 보존 기능으로 버전 업데이트
+ANALYSIS_ENGINE_VERSION = "Enhanced Multi-Framework 1.1"
 
 
 @app.route('/api/v1/health', methods=['GET'])
@@ -80,7 +83,8 @@ def health_check():
                 "contextualParsing": True,
                 "detailedReporting": True,  # 🔥 새로운 기능
                 "accurateLineNumbers": True,  # 🔥 새로운 기능
-                "consolidatedStatistics": True  # 🔥 새로운 기능
+                "consolidatedStatistics": True,  # 🔥 새로운 기능
+                "iosVersionDetection": True  # 🔥 새로운 기능
             },
             "supportedFrameworks": list(supported_sources.keys()),
             "implementedFrameworks": implemented_frameworks,
@@ -218,7 +222,8 @@ def analyze_config():
         config_lines_count = len(analysis_request.config_text.splitlines())
         logger.info(f"분석 요청 수신 - 지침서: {framework}, "
                    f"장비 타입: {analysis_request.device_type}, "
-                   f"설정 라인 수: {config_lines_count}")
+                   f"설정 라인 수: {config_lines_count}, "
+                   f"통합 통계: {use_consolidation}")
         
         # 🔥 개선된 분석 수행
         analysis_result = analyzer.analyze_config(
@@ -227,12 +232,18 @@ def analyze_config():
             use_consolidation=use_consolidation
         )
         
-        # 컨텍스트 정보 추가
+        # 컨텍스트 정보 추가 (IOS 버전 정보 포함)
         context_info = _extract_context_info(analysis_request.config_text, analysis_request.device_type)
+        
+        # 🔥 장비 타입에 IOS 버전 정보 추가
+        device_type_with_version = _get_device_type_with_version(
+            analysis_request.device_type, 
+            context_info.get('iosVersion')
+        )
         
         # 🔥 개선된 응답 생성
         response = AnalysisResponse(
-            device_type=analysis_request.device_type,
+            device_type=device_type_with_version,  # IOS 버전 포함된 장비 타입
             total_lines=config_lines_count,
             issues_found=len(analysis_result.vulnerabilities),
             analysis_time=analysis_result.analysis_time,
@@ -247,6 +258,12 @@ def analyze_config():
             "frameworkInfo": get_source_info(framework),
             "engineVersion": ANALYSIS_ENGINE_VERSION,
             "contextInfo": context_info,
+            "deviceInfo": {  # 🔥 새로운 장비 정보 섹션
+                "originalDeviceType": analysis_request.device_type,
+                "deviceTypeWithVersion": device_type_with_version,
+                "iosVersion": context_info.get('iosVersion'),
+                "isVersionDetected": context_info.get('iosVersion') is not None
+            },
             "analysisOptions": {
                 "useConsolidation": use_consolidation,
                 "showDetailedInfo": show_detailed_info,
@@ -272,6 +289,7 @@ def analyze_config():
             response_dict["detailedSummary"] = detailed_summary
         
         logger.info(f"분석 완료 - 지침서: {framework}, "
+                   f"장비: {device_type_with_version}, "  # 🔥 IOS 버전 포함된 장비 타입 표시
                    f"발견된 취약점: {response.issues_found}개, "
                    f"분석 시간: {analysis_result.analysis_time:.2f}초, "
                    f"통합 통계: {use_consolidation}")
@@ -288,6 +306,7 @@ def analyze_config():
             "engineVersion": ANALYSIS_ENGINE_VERSION,
             "framework": request.json.get('framework', 'KISA') if request.json else None
         }), 500
+
 
 @app.route('/api/v1/config-analyze/detailed', methods=['POST'])
 def analyze_config_detailed():
@@ -342,77 +361,6 @@ def analyze_config_summary():
             "details": str(e)
         }), 500
 
-
-def _generate_detailed_summary(vulnerabilities: List) -> Dict[str, Any]:
-    """🔥 상세 요약 정보 생성"""
-    
-    # 인터페이스별 문제 집계
-    interface_issues = {}
-    service_issues = {}
-    user_issues = {}
-    global_issues = []
-    
-    for vuln in vulnerabilities:
-        if vuln.analysis_details:
-            details = vuln.analysis_details
-            
-            # 인터페이스 관련 문제
-            if 'interface_name' in details:
-                interface_name = details['interface_name']
-                if interface_name not in interface_issues:
-                    interface_issues[interface_name] = []
-                interface_issues[interface_name].append({
-                    'ruleId': vuln.rule_id,
-                    'severity': vuln.severity,
-                    'issue': details.get('vulnerability', 'configuration_issue'),
-                    'line': vuln.line
-                })
-            
-            # 사용자 관련 문제
-            elif 'username' in details:
-                username = details['username']
-                if username not in user_issues:
-                    user_issues[username] = []
-                user_issues[username].append({
-                    'ruleId': vuln.rule_id,
-                    'severity': vuln.severity,
-                    'issue': details.get('vulnerability', 'user_configuration_issue'),
-                    'line': vuln.line
-                })
-            
-            # 서비스 관련 문제
-            elif 'service_name' in details:
-                service_name = details['service_name']
-                if service_name not in service_issues:
-                    service_issues[service_name] = []
-                service_issues[service_name].append({
-                    'ruleId': vuln.rule_id,
-                    'severity': vuln.severity,
-                    'issue': details.get('vulnerability', 'service_configuration_issue'),
-                    'line': vuln.line
-                })
-            
-            # 전역 설정 문제
-            else:
-                global_issues.append({
-                    'ruleId': vuln.rule_id,
-                    'severity': vuln.severity,
-                    'issue': details.get('vulnerability', 'global_configuration_issue'),
-                    'line': vuln.line
-                })
-    
-    return {
-        "interfaceIssues": interface_issues,
-        "userIssues": user_issues,
-        "serviceIssues": service_issues,
-        "globalIssues": global_issues,
-        "summary": {
-            "affectedInterfaces": len(interface_issues),
-            "affectedUsers": len(user_issues),
-            "affectedServices": len(service_issues),
-            "globalConfigurationIssues": len(global_issues)
-        }
-    }
 
 @app.route('/api/v1/rules', methods=['GET'])
 def get_rules():
@@ -521,7 +469,8 @@ def get_supported_device_types():
                     "features": {
                         "contextParsing": device_type in ["Cisco", "Juniper"],
                         "interfaceAnalysis": device_type in ["Cisco", "Juniper", "Piolink"],
-                        "serviceAnalysis": True
+                        "serviceAnalysis": True,
+                        "iosVersionDetection": device_type == "Cisco"  # 🔥 새로운 기능
                     }
                 }
         except:
@@ -545,51 +494,6 @@ def get_supported_device_types():
         return jsonify({
             "success": False,
             "error": "지원 장비 타입 조회 실패",
-            "details": str(e)
-        }), 500
-
-
-@app.route('/api/v1/frameworks/<framework_id>/rules', methods=['GET'])
-def get_framework_rules(framework_id):
-    """특정 지침서의 룰 목록 조회"""
-    try:
-        framework = framework_id.upper()
-        include_examples = request.args.get('includeExamples', 'false').lower() == 'true'
-        device_type = request.args.get('deviceType')
-        
-        # 지침서별 룰 로드
-        try:
-            rules_dict = load_rules(framework)
-        except ValueError as e:
-            return jsonify({
-                "success": False,
-                "error": f"지원되지 않는 지침서: {framework}",
-                "supportedFrameworks": list(get_supported_sources().keys())
-            }), 404
-        except NotImplementedError as e:
-            return jsonify({
-                "success": False,
-                "error": f"{framework} 지침서는 아직 구현되지 않았습니다."
-            }), 501
-        
-        rules = analyzer.get_available_rules(framework)
-        
-        # 필터 적용
-        if device_type:
-            rules = [rule for rule in rules if device_type in rule['deviceTypes']]
-        
-        return jsonify({
-            "success": True,
-            "framework": framework,
-            "totalRules": len(rules),
-            "rules": rules
-        })
-        
-    except Exception as e:
-        logger.error(f"지침서 룰 조회 중 오류 발생: {str(e)}")
-        return jsonify({
-            "success": False,
-            "error": "지침서 룰 조회 실패",
             "details": str(e)
         }), 500
 
@@ -626,54 +530,19 @@ def get_analysis_statistics():
         }), 500
 
 
-@app.route('/api/v1/analyze-line', methods=['POST'])
-def analyze_single_line():
-    """단일 라인 분석 엔드포인트"""
-    try:
-        if not request.json:
-            return jsonify({
-                "success": False,
-                "error": "JSON 데이터가 필요합니다"
-            }), 400
-        
-        line = request.json.get('line')
-        device_type = request.json.get('deviceType')
-        rule_ids = request.json.get('ruleIds')
-        framework = request.json.get('framework', 'KISA').upper()
-        
-        if not line or not device_type:
-            return jsonify({
-                "success": False,
-                "error": "line과 deviceType이 필요합니다"
-            }), 400
-        
-        # 단일 라인 분석 실행
-        vulnerabilities = analyzer.analyze_single_line(line, device_type, rule_ids, framework)
-        
-        return jsonify({
-            "success": True,
-            "framework": framework,
-            "line": line,
-            "deviceType": device_type,
-            "appliedRules": rule_ids or "all",
-            "issuesFound": len(vulnerabilities),
-            "results": [vuln.to_dict() for vuln in vulnerabilities]
-        })
-        
-    except Exception as e:
-        logger.error(f"단일 라인 분석 중 오류 발생: {str(e)}")
-        return jsonify({
-            "success": False,
-            "error": "단일 라인 분석 실패",
-            "details": str(e)
-        }), 500
-
-
 def _extract_context_info(config_text: str, device_type: str) -> Dict[str, Any]:
-    """설정 파일에서 컨텍스트 정보 추출"""
+    """설정 파일에서 컨텍스트 정보 추출 - IOS 버전 정보 포함"""
     try:
         from rules.kisa_rules import parse_config_context
         context = parse_config_context(config_text, device_type)
+        
+        # 🔥 IOS 버전 정보 추출
+        ios_version = None
+        if hasattr(context, 'ios_version') and context.ios_version:
+            ios_version = context.ios_version
+        else:
+            # 직접 버전 추출 시도
+            ios_version = _extract_ios_version_from_config(config_text)
         
         return {
             "totalInterfaces": len(context.parsed_interfaces),
@@ -682,6 +551,7 @@ def _extract_context_info(config_text: str, device_type: str) -> Dict[str, Any]:
             "configuredServices": len(context.parsed_services),
             "globalSettings": len(context.global_settings),
             "deviceType": device_type,
+            "iosVersion": ios_version,  # 🔥 IOS 버전 정보 추가
             "configComplexity": _calculate_config_complexity(context),
             "hasVtyLines": len(context.vty_lines) > 0,
             "hasSnmpCommunities": len(context.snmp_communities) > 0,
@@ -689,9 +559,12 @@ def _extract_context_info(config_text: str, device_type: str) -> Dict[str, Any]:
         }
     except Exception as e:
         logger.warning(f"컨텍스트 정보 추출 실패: {e}")
+        # 실패한 경우에도 직접 버전 추출 시도
+        ios_version = _extract_ios_version_from_config(config_text)
         return {
             "totalLines": len(config_text.splitlines()),
             "deviceType": device_type,
+            "iosVersion": ios_version,
             "extractionError": str(e)
         }
 
@@ -710,6 +583,137 @@ def _calculate_config_complexity(context) -> str:
         return "Medium"
     else:
         return "Complex"
+
+
+def _extract_ios_version_from_config(config_text: str) -> Optional[str]:
+    """🔥 설정 파일에서 직접 IOS 버전 추출"""
+    lines = config_text.splitlines()
+    
+    for line in lines:
+        line = line.strip()
+        
+        # version 명령어로 시작하는 경우
+        if line.startswith('version '):
+            version = line.split('version ', 1)[1].strip()
+            if version and not version.startswith('!'):
+                return version
+        
+        # show version 출력에서 IOS Software 찾기
+        elif 'IOS Software' in line or 'Cisco IOS Software' in line:
+            # Version 15.1(4)M5 형태 추출
+            version_match = re.search(r'Version\s+(\d+\.\d+(?:\(\d+\))?[A-Z0-9]*)', line, re.IGNORECASE)
+            if version_match:
+                return version_match.group(1)
+        
+        # IOS (tm) 형태
+        elif 'IOS (tm)' in line:
+            version_match = re.search(r'Version\s+(\d+\.\d+(?:\(\d+\))?[A-Z0-9]*)', line, re.IGNORECASE)
+            if version_match:
+                return version_match.group(1)
+        
+        # ! 주석에서 추출 시도
+        elif line.startswith('!') and ('version' in line.lower() or 'ios' in line.lower()):
+            version_match = re.search(r'(\d+\.\d+(?:\(\d+\))?[A-Z0-9]*)', line)
+            if version_match and len(version_match.group(1)) >= 4:  # 최소 길이 확인
+                return version_match.group(1)
+    
+    return None
+
+
+def _get_device_type_with_version(device_type: str, ios_version: Optional[str]) -> str:
+    """🔥 장비 타입에 IOS 버전 정보 추가"""
+    if ios_version and device_type.upper() == "CISCO":
+        # 버전 정보가 너무 길면 간소화
+        simplified_version = _simplify_ios_version(ios_version)
+        return f"{device_type} ({simplified_version})"
+    
+    return device_type
+
+
+def _simplify_ios_version(ios_version: str) -> str:
+    """🔥 IOS 버전을 간소화하여 표시"""
+    # 15.1(4)M5 -> 15.1
+    # 12.4(15)T7 -> 12.4
+    # 16.09.04 -> 16.09
+    
+    # 주요 버전만 추출 (첫 번째 괄호 전까지)
+    match = re.match(r'(\d+\.\d+)', ios_version)
+    if match:
+        return match.group(1)
+    
+    return ios_version
+
+
+def _generate_detailed_summary(vulnerabilities: List) -> Dict[str, Any]:
+    """🔥 상세 요약 정보 생성"""
+    
+    # 인터페이스별 문제 집계
+    interface_issues = {}
+    service_issues = {}
+    user_issues = {}
+    global_issues = []
+    
+    for vuln in vulnerabilities:
+        if vuln.analysis_details:
+            details = vuln.analysis_details
+            
+            # 인터페이스 관련 문제
+            if 'interface_name' in details:
+                interface_name = details['interface_name']
+                if interface_name not in interface_issues:
+                    interface_issues[interface_name] = []
+                interface_issues[interface_name].append({
+                    'ruleId': vuln.rule_id,
+                    'severity': vuln.severity,
+                    'issue': details.get('vulnerability', 'configuration_issue'),
+                    'line': vuln.line
+                })
+            
+            # 사용자 관련 문제
+            elif 'username' in details:
+                username = details['username']
+                if username not in user_issues:
+                    user_issues[username] = []
+                user_issues[username].append({
+                    'ruleId': vuln.rule_id,
+                    'severity': vuln.severity,
+                    'issue': details.get('vulnerability', 'user_configuration_issue'),
+                    'line': vuln.line
+                })
+            
+            # 서비스 관련 문제
+            elif 'service_name' in details:
+                service_name = details['service_name']
+                if service_name not in service_issues:
+                    service_issues[service_name] = []
+                service_issues[service_name].append({
+                    'ruleId': vuln.rule_id,
+                    'severity': vuln.severity,
+                    'issue': details.get('vulnerability', 'service_configuration_issue'),
+                    'line': vuln.line
+                })
+            
+            # 전역 설정 문제
+            else:
+                global_issues.append({
+                    'ruleId': vuln.rule_id,
+                    'severity': vuln.severity,
+                    'issue': details.get('vulnerability', 'global_configuration_issue'),
+                    'line': vuln.line
+                })
+    
+    return {
+        "interfaceIssues": interface_issues,
+        "userIssues": user_issues,
+        "serviceIssues": service_issues,
+        "globalIssues": global_issues,
+        "summary": {
+            "affectedInterfaces": len(interface_issues),
+            "affectedUsers": len(user_issues),
+            "affectedServices": len(service_issues),
+            "globalConfigurationIssues": len(global_issues)
+        }
+    }
 
 
 @app.errorhandler(404)
@@ -742,7 +746,7 @@ if __name__ == '__main__':
     # 시작 로그
     logger.info(f"KISA 네트워크 보안 분석 API 시작 - Enhanced Multi-Framework Version {API_VERSION}")
     logger.info(f"분석 엔진: {ANALYSIS_ENGINE_VERSION}")
-    logger.info(f"새로운 기능: 상세 정보 보존, 정확한 라인 번호, 통합 통계 옵션")
+    logger.info(f"새로운 기능: 상세 정보 보존, 정확한 라인 번호, 통합 통계 옵션, IOS 버전 표시")
     
     try:
         # 지원 지침서 확인
