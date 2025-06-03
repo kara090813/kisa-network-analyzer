@@ -119,7 +119,7 @@ def check_password_encryption(line: str, line_num: int, context: ConfigContext) 
         if 'line con' in line_content.lower():
             # console 설정 섹션 시작
             continue
-        if line_content.strip().startswith('password ') and not any(enc in line_content for enc in ['$', '7 ', '5 ']):
+        if line_content.strip().startswith('password ') and not any(enc in line_content for enc in ['secret', '$', '5']):
             # 평문 패스워드 발견
             console_password_issues.append(line_content.strip())
     
