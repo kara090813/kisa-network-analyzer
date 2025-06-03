@@ -137,7 +137,7 @@ def check_nw_03(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
     # Console 라인에서 평문 패스워드 확인
     console_password_found = False
     for line_content in context.config_lines:
-        if line_content.strip().startswith('password ') and not any(enc in line_content for enc in ['$', '7 ', '5 ']):
+        if line_content.strip().startswith('password ') and not any(enc in line_content for enc in ['secret', '$', '5']):
             console_password_found = True
             break
     
