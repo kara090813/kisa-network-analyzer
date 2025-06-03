@@ -774,7 +774,7 @@ NW_RULES = {
             r"no\s+ip\s+mask-reply"
         ],
         device_types=["Cisco"],
-        recommendation="각 인터페이스에서 no ip mask-reply 설정",
+        recommendation="각 인터페이스에서 no ip mask-reply 설정(기본 비활성)",
         reference="NW 가이드 NW-37 (중) mask-reply 차단",
         logical_check_function = check_nw_37,
     ),

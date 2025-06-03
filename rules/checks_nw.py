@@ -1533,7 +1533,7 @@ def check_nw_37(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
         mask_reply_disabled = False
         
         for config_line in interface_config.get('config_lines', []):
-            if 'no ip mask-reply' in config_line:
+            if 'ip mask-reply' in config_line:
                 mask_reply_disabled = True
                 break
         
@@ -1542,9 +1542,9 @@ def check_nw_37(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
                 'line': interface_config['line_number'],
                 'matched_text': f"interface {interface_name}",
                 'details': {
-                    'vulnerability': 'mask_reply_not_disabled',
+                    'vulnerability': 'mask_reply_abled',
                     'interface_name': interface_name,
-                    'recommendation': 'Disable mask reply: no ip mask-reply'
+                    'recommendation': 'Disable mask reply: ip mask-reply'
                 }
             })
     

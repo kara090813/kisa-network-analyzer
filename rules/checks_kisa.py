@@ -379,6 +379,7 @@ def check_snmp_security(line: str, line_num: int, context: ConfigContext) -> Lis
     
     return vulnerabilities
 
+
 def check_snmp_acl_configuration(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """N-09: SNMP ACL 설정 - 개선된 논리 기반 분석"""
     vulnerabilities = []
@@ -398,7 +399,6 @@ def check_snmp_acl_configuration(line: str, line_num: int, context: ConfigContex
             })
     
     return vulnerabilities
-
 
 
 def check_snmp_community_permissions(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
@@ -565,7 +565,6 @@ def check_unused_interface_shutdown(line: str, line_num: int, context: ConfigCon
             })
     
     return vulnerabilities
-
 
 
 def check_user_privilege_levels(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
@@ -1116,7 +1115,7 @@ def check_mask_reply_status(line: str, line_num: int, context: ConfigContext) ->
         mask_reply_disabled = False
         
         for config_line in interface_config.get('config_lines', []):
-            if 'no ip mask-reply' in config_line:
+            if 'ip mask-reply' in config_line:
                 mask_reply_disabled = True
                 break
         
@@ -1125,9 +1124,9 @@ def check_mask_reply_status(line: str, line_num: int, context: ConfigContext) ->
                 'line': interface_config['line_number'],
                 'matched_text': f"interface {interface_name}",
                 'details': {
-                    'vulnerability': 'mask_reply_not_disabled',
+                    'vulnerability': 'mask_reply_abled',
                     'interface_name': interface_name,
-                    'recommendation': 'Disable mask reply: no ip mask-reply'
+                    'recommendation': 'Disable mask reply: ip mask-reply'
                 }
             })
     
@@ -1169,9 +1168,6 @@ def check_switch_hub_security(line: str, line_num: int, context: ConfigContext) 
         })
     
     return vulnerabilities
-
-
-
 
 def _is_critical_interface(interface_name: str, device_type: str) -> bool:
     """중요 인터페이스 여부 판별 - 강화된 버전"""
