@@ -381,7 +381,7 @@ def _is_critical_interface_nw(interface_name: str, device_type: str) -> bool:
         if interface_lower.startswith('serial'):
             return True
     
-    return False
+    return False 
 
 
 def check_nw_11(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
