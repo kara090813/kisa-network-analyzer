@@ -362,59 +362,186 @@ def check_nw_07(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
 
 
 def check_nw_08(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """NW-08: 불필요한 보조 입출력 포트 사용 금지 - 개선된 분석"""
+    """NW-08: 불필요한 보조 입출력 포트 사용 금지 - 보조 포트 전용 분석"""
     vulnerabilities = []
     
-    for interface_name, interface_config in context.parsed_interfaces.items():
-        # 물리적 인터페이스만 체크
-        is_physical = interface_config['port_type'] in [
-            'FastEthernet', 'GigabitEthernet', 'TenGigabitEthernet', 'Serial'
-        ]
+    # AUX 포트 보안 설정 확인
+    aux_issues = _check_aux_port_security_nw08(context)
+    vulnerabilities.extend(aux_issues)
+    
+    # Console 포트 보안 설정 확인
+    console_issues = _check_console_port_security_nw08(context)
+    vulnerabilities.extend(console_issues)
+    
+    return vulnerabilities
+
+
+def _check_aux_port_security_nw08(context: ConfigContext) -> List[Dict[str, Any]]:
+    """AUX 포트 보안 설정 확인 (NW-08 전용)"""
+    issues = []
+    
+    # AUX 라인 설정 찾기
+    config_lines = context.config_lines
+    aux_line_found = False
+    aux_line_number = 0
+    aux_config = {
+        'has_no_exec': False,
+        'transport_input_none': False,
+        'has_password': False,
+        'exec_timeout_zero': False
+    }
+    
+    in_aux_section = False
+    
+    for i, line in enumerate(config_lines):
+        line_clean = line.strip()
+        original_line = line
         
-        if not is_physical:
+        # AUX 라인 시작
+        if line_clean.startswith('line aux'):
+            aux_line_found = True
+            aux_line_number = i + 1
+            in_aux_section = True
             continue
-        
-        # 보조 포트 여부 확인
-        is_auxiliary = any(aux in interface_name.lower() for aux in ['aux', 'console'])
-        
-        # 사용 여부 더 정확히 판단
-        is_configured = any([
-            interface_config['has_ip_address'],
-            interface_config['has_description'],
-            interface_config['has_vlan'],
-            interface_config.get('has_nat', False),
-            interface_config.get('has_acl', False),
-            interface_config.get('is_trunk', False),
-            'channel-group' in str(interface_config.get('config_lines', [])),
-            'standby' in str(interface_config.get('config_lines', [])),
-        ])
-        
-        is_shutdown = interface_config['is_shutdown']
-        
-        # 미래 사용 예정 확인 (description에 planned, future, reserved 등)
-        description = interface_config.get('description', '').lower()
-        is_reserved = any(word in description for word in [
-            'planned', 'future', 'reserved', 'spare', 'backup', 'standby'
-        ])
-        
-        # 정말 미사용이고 shutdown되지 않은 경우만
-        if not is_configured and not is_shutdown and not is_reserved:
-            severity = 'High' if is_auxiliary else 'Medium'
             
-            vulnerabilities.append({
-                'line': interface_config['line_number'],
-                'matched_text': f"interface {interface_name}",
+        # AUX 섹션 내부 설정
+        elif in_aux_section and original_line.startswith(' '):
+            if 'no exec' in line_clean:
+                aux_config['has_no_exec'] = True
+            elif 'transport input none' in line_clean:
+                aux_config['transport_input_none'] = True
+            elif 'password' in line_clean:
+                aux_config['has_password'] = True
+            elif 'exec-timeout 0' in line_clean:
+                aux_config['exec_timeout_zero'] = True
+                
+        # 다른 섹션 시작하면 AUX 섹션 종료
+        elif in_aux_section and not original_line.startswith(' ') and line_clean:
+            in_aux_section = False
+    
+    if aux_line_found:
+        # AUX 포트가 설정되었지만 보안 설정이 부족한 경우
+        security_issues = []
+        
+        if not aux_config['has_no_exec']:
+            security_issues.append('exec_enabled')
+            
+        if not aux_config['transport_input_none']:
+            security_issues.append('transport_input_not_disabled')
+            
+        if aux_config['has_password'] and not aux_config['has_no_exec']:
+            security_issues.append('password_set_but_exec_enabled')
+            
+        if aux_config['exec_timeout_zero']:
+            security_issues.append('infinite_timeout')
+        
+        if security_issues:
+            issues.append({
+                'line': aux_line_number,
+                'matched_text': 'line aux 0 (insecure configuration)',
                 'details': {
-                    'interface_name': interface_name,
-                    'port_type': interface_config['port_type'],
-                    'reason': 'Unused interface not shutdown',
-                    'is_auxiliary': is_auxiliary,
-                    'recommendation': 'Shutdown unused interfaces or add description for future use',
-                    'severity_adjusted': severity
+                    'port_type': 'aux',
+                    'vulnerability': 'aux_port_not_secured',
+                    'security_issues': security_issues,
+                    'current_config': aux_config,
+                    'recommendation': 'Configure: no exec, transport input none to secure AUX port',
+                    'severity_adjusted': 'High'
                 }
             })
     
-    return vulnerabilities
+    return issues
+
+
+def _check_console_port_security_nw08(context: ConfigContext) -> List[Dict[str, Any]]:
+    """Console 포트 보안 설정 확인 (NW-08 전용)"""
+    issues = []
+    
+    # Console 라인 설정 찾기
+    config_lines = context.config_lines
+    console_line_found = False
+    console_line_number = 0
+    console_config = {
+        'has_password': False,
+        'has_login': False,
+        'exec_timeout': None,
+        'has_logging_sync': False
+    }
+    
+    in_console_section = False
+    
+    for i, line in enumerate(config_lines):
+        line_clean = line.strip()
+        original_line = line
+        
+        # Console 라인 시작 (line con 0 또는 line console 0)
+        if line_clean.startswith('line con') or line_clean.startswith('line console'):
+            console_line_found = True
+            console_line_number = i + 1
+            in_console_section = True
+            continue
+            
+        # Console 섹션 내부 설정
+        elif in_console_section and original_line.startswith(' '):
+            if 'password' in line_clean:
+                console_config['has_password'] = True
+            elif line_clean in ['login', 'login local']:
+                console_config['has_login'] = True
+            elif 'exec-timeout' in line_clean:
+                # exec-timeout 값 파싱
+                parts = line_clean.split()
+                if len(parts) >= 2:
+                    try:
+                        minutes = int(parts[1])
+                        seconds = int(parts[2]) if len(parts) > 2 else 0
+                        console_config['exec_timeout'] = minutes * 60 + seconds
+                    except:
+                        pass
+            elif 'logging synchronous' in line_clean:
+                console_config['has_logging_sync'] = True
+                
+        # 다른 섹션 시작하면 Console 섹션 종료
+        elif in_console_section and not original_line.startswith(' ') and line_clean:
+            in_console_section = False
+    
+    if console_line_found:
+        # Console 포트 보안 권고사항 확인
+        recommendations = []
+        
+        # 패스워드가 없는 경우
+        if not console_config['has_password']:
+            recommendations.append('set_console_password')
+            
+        # 로그인 설정이 없는 경우
+        if not console_config['has_login']:
+            recommendations.append('configure_login')
+            
+        # 무제한 타임아웃인 경우
+        if console_config['exec_timeout'] == 0:
+            recommendations.append('set_exec_timeout')
+            
+        # 로깅 동기화가 없는 경우 (보안과 직접 관련은 없지만 권고)
+        if not console_config['has_logging_sync']:
+            recommendations.append('enable_logging_sync')
+        
+        # 심각한 보안 문제만 보고 (패스워드나 로그인이 없는 경우)
+        critical_issues = [r for r in recommendations if r in ['set_console_password', 'configure_login']]
+        
+        if critical_issues:
+            issues.append({
+                'line': console_line_number,
+                'matched_text': 'line con 0 (security recommendations)',
+                'details': {
+                    'port_type': 'console',
+                    'vulnerability': 'console_port_security_recommendations',
+                    'critical_issues': critical_issues,
+                    'all_recommendations': recommendations,
+                    'current_config': console_config,
+                    'recommendation': 'Secure console port with password and login configuration',
+                    'severity_adjusted': 'Medium' if 'set_console_password' in critical_issues else 'Low'
+                }
+            })
+    
+    return issues
 
 
 def check_nw_09(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
