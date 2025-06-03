@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-models/analysis_response.py
-분석 응답 데이터 모델
+models/analysis_response.py (개선된 버전)
+분석 응답 데이터 모델 - 상세 정보 보존 및 정확한 라인 번호 제공
 
 KISA 네트워크 장비 취약점 분석 결과를 위한 데이터 구조 정의
 """
 
 from dataclasses import dataclass
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 from datetime import datetime
 from enum import Enum
 
@@ -21,7 +21,7 @@ class Severity(Enum):
 
 @dataclass
 class VulnerabilityIssue:
-    """발견된 취약점 정보"""
+    """발견된 취약점 정보 - 상세 정보 포함"""
     rule_id: str
     severity: str
     line: int
@@ -31,6 +31,10 @@ class VulnerabilityIssue:
     reference: str
     category: Optional[str] = None
     raw_match: Optional[str] = None
+    # 🔥 새로운 필드: 상세 정보 보존
+    affected_items: Optional[List[Dict[str, Any]]] = None  # 영향받는 인터페이스/설정들
+    summary_info: Optional[Dict[str, Any]] = None  # 요약 정보
+    analysis_details: Optional[Dict[str, Any]] = None  # 분석 상세 내용
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'VulnerabilityIssue':
@@ -44,11 +48,14 @@ class VulnerabilityIssue:
             recommendation=data['recommendation'],
             reference=data['reference'],
             category=data.get('category'),
-            raw_match=data.get('rawMatch')
+            raw_match=data.get('rawMatch'),
+            affected_items=data.get('affectedItems'),
+            summary_info=data.get('summaryInfo'),
+            analysis_details=data.get('analysisDetails')
         )
     
     def to_dict(self) -> Dict[str, Any]:
-        """딕셔너리로 변환"""
+        """딕셔너리로 변환 - 상세 정보 포함"""
         result = {
             'ruleId': self.rule_id,
             'severity': self.severity,
@@ -63,8 +70,34 @@ class VulnerabilityIssue:
             result['category'] = self.category
         if self.raw_match:
             result['rawMatch'] = self.raw_match
+        if self.affected_items:
+            result['affectedItems'] = self.affected_items
+        if self.summary_info:
+            result['summaryInfo'] = self.summary_info
+        if self.analysis_details:
+            result['analysisDetails'] = self.analysis_details
             
         return result
+    
+    def get_display_summary(self) -> str:
+        """사용자에게 표시할 요약 정보 생성"""
+        if self.summary_info:
+            if self.summary_info.get('total_affected', 0) > 1:
+                affected_type = self.summary_info.get('affected_type', 'items')
+                total = self.summary_info.get('total_affected', 0)
+                items = self.summary_info.get('affected_list', [])
+                
+                # 처음 3개만 보여주고 나머지는 개수로 표시
+                display_items = items[:3] if len(items) > 3 else items
+                remaining = len(items) - 3 if len(items) > 3 else 0
+                
+                items_str = ", ".join(display_items)
+                if remaining > 0:
+                    items_str += f" (+{remaining} more)"
+                
+                return f"{total} {affected_type} affected: {items_str}"
+        
+        return self.matched_text
 
 
 @dataclass
@@ -76,10 +109,13 @@ class AnalysisStatistics:
     high_severity_issues: int
     medium_severity_issues: int
     low_severity_issues: int
+    # 🔥 새로운 필드: 상세 통계
+    total_individual_findings: Optional[int] = None  # 개별 발견 사항 총 개수
+    consolidated_rules: Optional[int] = None  # 통합된 룰 개수
     
     def to_dict(self) -> Dict[str, Any]:
         """딕셔너리로 변환"""
-        return {
+        result = {
             'totalRulesChecked': self.total_rules_checked,
             'rulesPassed': self.rules_passed,
             'rulesFailed': self.rules_failed,
@@ -87,6 +123,13 @@ class AnalysisStatistics:
             'mediumSeverityIssues': self.medium_severity_issues,
             'lowSeverityIssues': self.low_severity_issues
         }
+        
+        if self.total_individual_findings is not None:
+            result['totalIndividualFindings'] = self.total_individual_findings
+        if self.consolidated_rules is not None:
+            result['consolidatedRules'] = self.consolidated_rules
+            
+        return result
 
 
 @dataclass
@@ -174,11 +217,140 @@ class AnalysisResponse:
             statistics=self.statistics,
             timestamp=self.timestamp
         )
+
+
+def create_consolidated_vulnerability(rule_id: str, individual_vulnerabilities: List[VulnerabilityIssue]) -> VulnerabilityIssue:
+    """
+    🔥 개별 취약점들을 하나의 통합 취약점으로 생성 - 상세 정보 보존
+    """
+    if not individual_vulnerabilities:
+        raise ValueError("No vulnerabilities to consolidate")
     
-def calculate_consolidated_statistics(vulnerabilities: List[VulnerabilityIssue]) -> Dict[str, int]:
+    # 가장 높은 심각도 선택
+    severity_order = {'상': 3, 'High': 3, '중': 2, 'Medium': 2, '하': 1, 'Low': 1}
+    primary_vuln = max(individual_vulnerabilities, 
+                      key=lambda v: severity_order.get(v.severity, 0))
+    
+    # 영향받는 항목들 추출
+    affected_items = []
+    affected_list = []
+    affected_type = "items"
+    
+    for vuln in individual_vulnerabilities:
+        item_info = {
+            'line': vuln.line,
+            'matchedText': vuln.matched_text,
+            'severity': vuln.severity
+        }
+        
+        # 분석 상세 정보에서 추가 정보 추출
+        if vuln.analysis_details:
+            details = vuln.analysis_details
+            
+            # 인터페이스 관련 정보
+            if 'interface_name' in details:
+                item_info['interfaceName'] = details['interface_name']
+                affected_list.append(details['interface_name'])
+                affected_type = "interfaces"
+            
+            # 사용자 관련 정보
+            if 'username' in details:
+                item_info['username'] = details['username']
+                affected_list.append(details['username'])
+                affected_type = "users"
+            
+            # 서비스 관련 정보
+            if 'service_name' in details:
+                item_info['serviceName'] = details['service_name']
+                affected_list.append(details['service_name'])
+                affected_type = "services"
+            
+            # SNMP 커뮤니티 관련 정보
+            if 'community' in details:
+                item_info['community'] = details['community']
+                affected_list.append(details['community'])
+                affected_type = "SNMP communities"
+        
+        affected_items.append(item_info)
+    
+    # 중복 제거
+    affected_list = list(set(affected_list))
+    
+    # 요약 정보 생성
+    summary_info = {
+        'total_affected': len(individual_vulnerabilities),
+        'affected_type': affected_type,
+        'affected_list': affected_list,
+        'severity_breakdown': {}
+    }
+    
+    # 심각도별 개수 계산
+    for vuln in individual_vulnerabilities:
+        severity = vuln.severity
+        summary_info['severity_breakdown'][severity] = summary_info['severity_breakdown'].get(severity, 0) + 1
+    
+    # 통합된 매치 텍스트 생성
+    if len(individual_vulnerabilities) > 1:
+        if affected_type == "interfaces" and len(affected_list) > 0:
+            matched_text = f"{len(affected_list)} interfaces affected: {', '.join(affected_list[:3])}"
+            if len(affected_list) > 3:
+                matched_text += f" (+{len(affected_list) - 3} more)"
+        else:
+            matched_text = f"{len(individual_vulnerabilities)} instances found"
+    else:
+        matched_text = primary_vuln.matched_text
+    
+    # 통합된 추천사항 생성
+    if len(set(v.recommendation for v in individual_vulnerabilities)) == 1:
+        # 모든 추천사항이 동일한 경우
+        recommendation = primary_vuln.recommendation
+    else:
+        # 추천사항이 다른 경우 통합
+        recommendation = f"Apply security configuration for {len(individual_vulnerabilities)} items. See details for specific recommendations."
+    
+    # 첫 번째 취약점의 라인 또는 가장 작은 라인 번호 사용
+    line_numbers = [v.line for v in individual_vulnerabilities if v.line > 0]
+    primary_line = min(line_numbers) if line_numbers else individual_vulnerabilities[0].line
+    
+    return VulnerabilityIssue(
+        rule_id=rule_id,
+        severity=primary_vuln.severity,
+        line=primary_line,
+        matched_text=matched_text,
+        description=primary_vuln.description,
+        recommendation=recommendation,
+        reference=primary_vuln.reference,
+        category=primary_vuln.category,
+        affected_items=affected_items,
+        summary_info=summary_info,
+        analysis_details={
+            'consolidation_type': 'multiple_instances',
+            'total_instances': len(individual_vulnerabilities),
+            'primary_severity': primary_vuln.severity,
+            'line_numbers': [v.line for v in individual_vulnerabilities],
+            'affected_items_detail': affected_list
+        }
+    )
+
+
+def calculate_consolidated_statistics(vulnerabilities: List[VulnerabilityIssue]) -> Dict[str, Any]:
     """
-    통합된 통계 계산 - 룰별로 1개씩만 카운트
+    🔥 개선된 통합 통계 계산 - 상세 정보 보존
+    
+    룰별로 통합하되, 개별 발견 사항의 상세 정보는 보존
     """
+    if not vulnerabilities:
+        return {
+            'consolidated_vulnerabilities': [],
+            'statistics': {
+                'total_vulnerabilities': 0,
+                'total_individual_findings': 0,
+                'high_severity': 0,
+                'medium_severity': 0,
+                'low_severity': 0,
+                'consolidated_rules': 0
+            }
+        }
     
     # 룰별로 그룹화
     rule_groups = {}
@@ -188,18 +360,21 @@ def calculate_consolidated_statistics(vulnerabilities: List[VulnerabilityIssue])
             rule_groups[rule_id] = []
         rule_groups[rule_id].append(vuln)
     
-    # 룰별 대표 취약점 선택 (가장 높은 심각도)
-    severity_order = {'상': 3, 'High': 3, '중': 2, 'Medium': 2, '하': 1, 'Low': 1}
-    
+    # 룰별로 통합된 취약점 생성
     consolidated_vulnerabilities = []
+    
     for rule_id, rule_vulns in rule_groups.items():
-        # 가장 높은 심각도의 취약점을 대표로 선택
-        primary_vuln = max(rule_vulns, 
-                          key=lambda v: severity_order.get(v.severity, 0))
-        consolidated_vulnerabilities.append(primary_vuln)
+        if len(rule_vulns) == 1:
+            # 단일 취약점인 경우 그대로 사용
+            consolidated_vulnerabilities.append(rule_vulns[0])
+        else:
+            # 다중 취약점인 경우 통합
+            consolidated_vuln = create_consolidated_vulnerability(rule_id, rule_vulns)
+            consolidated_vulnerabilities.append(consolidated_vuln)
     
     # 통계 계산
     total_rules = len(consolidated_vulnerabilities)
+    total_individual = len(vulnerabilities)
     severity_counts = {'상': 0, 'High': 0, '중': 0, 'Medium': 0, '하': 0, 'Low': 0}
     
     for vuln in consolidated_vulnerabilities:
@@ -207,10 +382,138 @@ def calculate_consolidated_statistics(vulnerabilities: List[VulnerabilityIssue])
             severity_counts[vuln.severity] += 1
     
     return {
-        'total_vulnerabilities': total_rules,
-        'high_severity': severity_counts['상'] + severity_counts['High'],
-        'medium_severity': severity_counts['중'] + severity_counts['Medium'],
-        'low_severity': severity_counts['하'] + severity_counts['Low']
+        'consolidated_vulnerabilities': consolidated_vulnerabilities,
+        'statistics': {
+            'total_vulnerabilities': total_rules,
+            'total_individual_findings': total_individual,
+            'high_severity': severity_counts['상'] + severity_counts['High'],
+            'medium_severity': severity_counts['중'] + severity_counts['Medium'],
+            'low_severity': severity_counts['하'] + severity_counts['Low'],
+            'consolidated_rules': total_rules
+        }
+    }
+
+
+def find_actual_line_number(config_lines: List[str], search_patterns: List[str], 
+                          interface_name: str = None, context_lines: int = 5) -> int:
+    """
+    🔥 실제 설정 라인 번호를 정확하게 찾는 헬퍼 함수
+    
+    Args:
+        config_lines: 설정 파일 라인들
+        search_patterns: 검색할 패턴들
+        interface_name: 인터페이스 이름 (인터페이스 관련 설정인 경우)
+        context_lines: 컨텍스트 라인 범위
+    
+    Returns:
+        실제 라인 번호 (1-based), 찾지 못하면 0
+    """
+    if not config_lines or not search_patterns:
+        return 0
+    
+    # 인터페이스 관련 설정인 경우
+    if interface_name:
+        in_interface_section = False
+        interface_start_line = 0
+        
+        for i, line in enumerate(config_lines):
+            line_clean = line.strip()
+            original_line = line
+            
+            # 인터페이스 시작
+            if line_clean.startswith(f'interface {interface_name}'):
+                in_interface_section = True
+                interface_start_line = i + 1
+                continue
+            
+            # 인터페이스 섹션 내부
+            elif in_interface_section and original_line.startswith(' '):
+                # 패턴 매칭
+                for pattern in search_patterns:
+                    if pattern.lower() in line_clean.lower():
+                        return i + 1
+                        
+            # 다른 섹션 시작하면 인터페이스 섹션 종료
+            elif in_interface_section and not original_line.startswith(' ') and line_clean:
+                in_interface_section = False
+        
+        # 인터페이스 섹션에서 찾지 못한 경우 인터페이스 시작 라인 반환
+        if interface_start_line > 0:
+            return interface_start_line
+    
+    # 전역 설정에서 검색
+    for i, line in enumerate(config_lines):
+        line_clean = line.strip()
+        for pattern in search_patterns:
+            if pattern.lower() in line_clean.lower():
+                return i + 1
+    
+    # 찾지 못한 경우
+    return 0
+
+
+def enhance_vulnerability_with_line_info(vuln: VulnerabilityIssue, 
+                                       config_lines: List[str]) -> VulnerabilityIssue:
+    """
+    🔥 취약점에 정확한 라인 정보 추가
+    """
+    if vuln.line > 0:
+        return vuln  # 이미 라인 정보가 있음
+    
+    # 분석 상세 정보에서 검색 패턴 추출
+    search_patterns = []
+    interface_name = None
+    
+    if vuln.analysis_details:
+        details = vuln.analysis_details
+        
+        # 인터페이스 이름
+        if 'interface_name' in details:
+            interface_name = details['interface_name']
+            search_patterns.append(f"interface {interface_name}")
+        
+        # 매치된 텍스트에서 패턴 추출
+        if vuln.matched_text and vuln.matched_text != 'Configuration check required':
+            # 간단한 키워드 추출
+            keywords = vuln.matched_text.split()
+            for keyword in keywords:
+                if len(keyword) > 3 and not keyword.isdigit():
+                    search_patterns.append(keyword)
+    
+    # 룰 ID 기반 패턴 추가
+    rule_patterns = _get_search_patterns_by_rule(vuln.rule_id)
+    search_patterns.extend(rule_patterns)
+    
+    # 실제 라인 번호 찾기
+    if search_patterns:
+        actual_line = find_actual_line_number(config_lines, search_patterns, interface_name)
+        if actual_line > 0:
+            vuln.line = actual_line
+    
+    return vuln
+
+
+def _get_search_patterns_by_rule(rule_id: str) -> List[str]:
+    """룰 ID별 검색 패턴 반환"""
+    patterns = {
+        'N-07': ['snmp-server', 'snmp'],
+        'N-11': ['service tftp', 'tftp'],
+        'N-25': ['service finger', 'finger'],
+        'N-26': ['ip http server', 'http server'],
+        'N-27': ['service tcp-small-servers', 'service udp-small-servers'],
+        'N-29': ['cdp run'],
+        'N-31': ['ip source-route'],
+        'N-35': ['ip domain-lookup', 'ip domain lookup'],
+        'N-36': ['service pad'],
+        'NW-16': ['snmp-server', 'snmp'],
+        'NW-20': ['service tftp', 'tftp'],
+        'NW-25': ['service finger', 'finger'],
+        'NW-26': ['ip http server', 'http server'],
+        'NW-27': ['service tcp-small-servers', 'service udp-small-servers'],
+        'NW-29': ['cdp run'],
+        'NW-31': ['ip source-route'],
+        'NW-35': ['ip domain-lookup', 'ip domain lookup'],
+        'NW-36': ['service pad'],
     }
     
-    
+    return patterns.get(rule_id, [])

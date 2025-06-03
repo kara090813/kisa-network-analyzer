@@ -637,30 +637,43 @@ def _check_console_port_security_nw08(context: ConfigContext) -> List[Dict[str, 
 
 
 def check_nw_09(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """NW-09: 로그온 시 경고 메시지 설정 - 수정된 버전"""
+    """NW-09: 로그온 시 경고 메시지 설정 - 🔥 정확한 라인 번호 제공"""
     vulnerabilities = []
     
     # 다양한 배너 타입 확인
     banner_found = False
     banner_types = ['motd', 'login', 'exec', 'incoming']
+    banner_line_number = 0
     
-    for line in context.config_lines:
+    for i, line in enumerate(context.config_lines):
         line_clean = line.strip()
         if line_clean.startswith('banner '):
             parts = line_clean.split()
             if len(parts) >= 2 and parts[1] in banner_types:
                 banner_found = True
+                banner_line_number = i + 1
                 break
     
     if not banner_found:
+        # 🔥 개선: 적절한 라인 번호 또는 위치 제안
+        suggested_line = 1
+        
+        # hostname 다음에 배너를 추가하는 것이 일반적
+        for i, line in enumerate(context.config_lines):
+            if line.strip().startswith('hostname '):
+                suggested_line = i + 2
+                break
+        
         vulnerabilities.append({
-            'line': 0,
+            'line': suggested_line,
             'matched_text': 'No login banner configured',
             'details': {
                 'vulnerability': 'no_login_banner',
                 'banner_types_checked': banner_types,
                 'recommendation': 'Configure banner motd or banner login for unauthorized access warning',
-                'security_impact': 'Lack of warning message may encourage unauthorized access attempts'
+                'security_impact': 'Lack of warning message may encourage unauthorized access attempts',
+                'suggested_config': 'banner motd ^C\nUnauthorized access prohibited!\n^C',
+                'line_number': suggested_line
             }
         })
     
@@ -691,28 +704,48 @@ def check_nw_10(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
 
 
 def check_nw_11(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """NW-11: 원격 로그서버 사용 - 논리 기반 분석"""
+    """NW-11: 원격 로그서버 사용 - 🔥 정확한 라인 번호 제공"""
     vulnerabilities = [] 
     
     # 원격 로그 서버 설정 확인
-    has_remote_logging = any([
-        'syslog host' in context.full_config,
-        'logging server' in context.full_config,
-        'syslog remote' in context.full_config
-    ])
+    has_remote_logging = False
+    logging_line_number = 0
     
-    # IP 패턴으로 로그 서버 검색 (간소화된 방법)
+    # IP 패턴으로 로그 서버 검색
     import re
-    ip_pattern = r'logging\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'
-    log_servers = re.findall(ip_pattern, context.full_config)
     
-    if not log_servers and not has_remote_logging:
+    for i, line in enumerate(context.config_lines):
+        # logging x.x.x.x 패턴 찾기
+        if re.match(r'logging\s+\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', line.strip()):
+            has_remote_logging = True
+            logging_line_number = i + 1
+            break
+        # syslog host 패턴 찾기
+        elif 'syslog host' in line.strip() or 'logging server' in line.strip():
+            has_remote_logging = True
+            logging_line_number = i + 1
+            break
+    
+    if not has_remote_logging:
+        # 🔥 개선: 적절한 위치 제안 (일반적으로 global config 영역)
+        suggested_line = 1
+        
+        # service timestamps 다음이 적절한 위치
+        for i, line in enumerate(context.config_lines):
+            if 'service timestamps' in line.strip():
+                suggested_line = i + 2
+                break
+            elif line.strip().startswith('hostname '):
+                suggested_line = i + 2
+        
         vulnerabilities.append({
-            'line': 0,
+            'line': suggested_line,
             'matched_text': 'No remote logging server configured',
             'details': {
                 'vulnerability': 'no_remote_logging',
-                'recommendation': 'Configure remote syslog server for log storage and analysis'
+                'recommendation': 'Configure remote syslog server: logging x.x.x.x',
+                'suggested_config': 'logging 192.168.1.100  ! Replace with actual syslog server IP',
+                'line_number': suggested_line
             }
         })
     
@@ -791,24 +824,42 @@ def check_nw_13(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
 
 
 def check_nw_14(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """NW-14: NTP 서버 연동 - 논리 기반 분석"""
+    """NW-14: NTP 서버 연동 - 🔥 정확한 라인 번호 제공"""
     vulnerabilities = []
     
     # NTP 서버 설정 확인
-    ntp_configured = any([
-        'ntp server' in context.full_config,
-        'sntp server' in context.full_config,
-        'ntp enable' in context.full_config,
-        'clock timezone' in context.full_config
-    ])
+    ntp_configured = False
+    ntp_line_number = 0
+    
+    for i, line in enumerate(context.config_lines):
+        line_clean = line.strip()
+        if (line_clean.startswith('ntp server ') or 
+            line_clean.startswith('sntp server ') or 
+            'clock timezone' in line_clean):
+            ntp_configured = True
+            ntp_line_number = i + 1
+            break
     
     if not ntp_configured:
+        # 🔥 개선: 적절한 위치 제안
+        suggested_line = 1
+        
+        # logging 설정 다음이 적절한 위치
+        for i, line in enumerate(context.config_lines):
+            if line.strip().startswith('logging ') and not line.strip().startswith('logging buffered'):
+                suggested_line = i + 2
+                break
+            elif line.strip().startswith('hostname '):
+                suggested_line = i + 2
+        
         vulnerabilities.append({
-            'line': 0,
+            'line': suggested_line,
             'matched_text': 'No NTP server configuration found',
             'details': {
                 'vulnerability': 'no_ntp_configuration',
-                'recommendation': 'Configure NTP server for time synchronization'
+                'recommendation': 'Configure NTP server: ntp server x.x.x.x',
+                'suggested_config': 'ntp server pool.ntp.org  ! Replace with appropriate NTP server',
+                'line_number': suggested_line
             }
         })
     
@@ -1139,7 +1190,7 @@ def check_nw_22(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
 
 
 def check_nw_23(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """NW-23: 사용하지 않는 인터페이스의 Shutdown 설정 - 완전히 새로운 확실한 버전"""
+    """NW-23: 사용하지 않는 인터페이스의 Shutdown 설정 - 🔥 개별 인터페이스별 보고로 개선"""
     vulnerabilities = []
     
     # config 데이터 확보
@@ -1158,6 +1209,7 @@ def check_nw_23(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
     interface_pattern = r'interface\s+(\S+)\s*\n((?:\s+.*\n?)*)'
     matches = re.findall(interface_pattern, config_text, re.MULTILINE)
     
+    # 🔥 개선: 각 인터페이스별로 개별 취약점 보고
     for interface_name, config_block in matches:
         
         # 물리적 인터페이스만 체크
@@ -1232,9 +1284,10 @@ def check_nw_23(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
             
             vulnerabilities.append({
                 'line': line_number,
-                'matched_text': f"interface {interface_name}",
+                'matched_text': f"interface {interface_name} - unused and not shutdown",
                 'details': {
                     'interface_name': interface_name,
+                    'vulnerability': 'unused_interface_not_shutdown',
                     'reason': 'Unused physical interface not shutdown',
                     'security_risk': 'Potential unauthorized physical access point',
                     'analysis': {
@@ -1246,7 +1299,8 @@ def check_nw_23(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
                         'is_used': is_used,
                         'config_block': config_block.strip()
                     },
-                    'recommendation': 'Add "shutdown" command to disable unused interface'
+                    'recommendation': f'Configure "shutdown" on interface {interface_name}',
+                    'line_number': line_number
                 }
             })
     
@@ -1395,18 +1449,17 @@ def check_nw_29(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
 
 
 def check_nw_30(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """NW-30: Directed-broadcast 차단 - 통합 보고 개선된 버전"""
+    """NW-30: Directed-broadcast 차단 - 🔥 개별 인터페이스별 보고로 개선"""
+    vulnerabilities = []
     
     # IOS 버전 확인
     ios_version = context.ios_version or "15.0"
     version_num = context.cisco_defaults._extract_version_number(ios_version)
     
     # 15.x에서는 기본값이 disabled이므로 덜 엄격하게 적용
-    strict_check = version_num < 12.0  # 12.0 이전에서만 엄격하게 체크
+    strict_check = version_num < 12.0
     
-    # 문제 있는 인터페이스들 수집
-    vulnerable_interfaces = []
-    
+    # 🔥 개선: 각 인터페이스별로 개별 취약점 보고
     for interface_name, interface_config in context.parsed_interfaces.items():
         # 서브인터페이스는 제외 (의미없음)
         if interface_config.get('is_subinterface', False):
@@ -1454,49 +1507,24 @@ def check_nw_30(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
         if is_vulnerable:
             status = "explicitly_enabled" if directed_broadcast_explicitly_enabled else "default_state"
             
-            vulnerable_interfaces.append({
-                'name': interface_name,
-                'line_number': interface_config['line_number'],
-                'status': status,
-                'severity': severity,
-                'type': interface_config['port_type']
+            vulnerabilities.append({
+                'line': interface_config['line_number'],
+                'matched_text': f"interface {interface_name} - directed-broadcast {status}",
+                'details': {
+                    'vulnerability': 'directed_broadcast_enabled',
+                    'interface_name': interface_name,
+                    'interface_type': interface_config['port_type'],
+                    'status': status,
+                    'ios_version': ios_version,
+                    'version_based_default': actual_state,
+                    'strict_check': strict_check,
+                    'recommendation': f'Configure "no ip directed-broadcast" on interface {interface_name}',
+                    'severity_adjusted': severity,
+                    'line_number': interface_config['line_number']
+                }
             })
     
-    # 🔧 개선: 문제가 있는 인터페이스들을 하나로 통합하여 보고
-    if vulnerable_interfaces:
-        # 가장 높은 심각도 선택
-        max_severity = "Low"
-        if any(i['severity'] == "High" for i in vulnerable_interfaces):
-            max_severity = "High"
-        elif any(i['severity'] == "Medium" for i in vulnerable_interfaces):
-            max_severity = "Medium"
-        
-        primary_interface = vulnerable_interfaces[0]
-        
-        return [{
-            'line': primary_interface['line_number'],
-            'matched_text': f"Multiple interfaces with directed-broadcast risk",
-            'details': {
-                'vulnerability': 'directed_broadcast_multiple',
-                'affected_interfaces': [i['name'] for i in vulnerable_interfaces],
-                'interface_count': len(vulnerable_interfaces),
-                'primary_interface': primary_interface['name'],
-                'ios_version': ios_version,
-                'version_based_analysis': {
-                    'strict_check': strict_check,
-                    'version_number': version_num
-                },
-                'status_breakdown': {
-                    'explicitly_enabled': len([i for i in vulnerable_interfaces if i['status'] == 'explicitly_enabled']),
-                    'default_state': len([i for i in vulnerable_interfaces if i['status'] == 'default_state'])
-                },
-                'recommendation': f'Review directed-broadcast settings on {len(vulnerable_interfaces)} interfaces (IOS {ios_version} default: disabled)',
-                'severity_adjusted': max_severity,
-                'interface_details': vulnerable_interfaces
-            }
-        }]
-    
-    return []
+    return vulnerabilities
 
 
 def check_nw_31(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
@@ -1520,11 +1548,10 @@ def check_nw_31(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
 
 
 def check_nw_32(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """NW-32: Proxy ARP 차단 - 통합 보고 개선된 버전"""
+    """NW-32: Proxy ARP 차단 - 🔥 개별 인터페이스별 보고로 개선"""
+    vulnerabilities = []
     
-    # 문제 있는 인터페이스들 수집
-    vulnerable_interfaces = []
-    
+    # 🔥 개선: 각 인터페이스별로 개별 취약점 보고
     for interface_name, interface_config in context.parsed_interfaces.items():
         # 서브인터페이스 제외
         if interface_config.get('is_subinterface', False):
@@ -1560,58 +1587,32 @@ def check_nw_32(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
         if actual_state:  # 활성화된 경우 취약
             status = "explicitly_enabled" if proxy_arp_explicitly_enabled else "default_enabled"
             
-            vulnerable_interfaces.append({
-                'name': interface_name,
-                'line_number': interface_config['line_number'],
-                'status': status,
-                'type': interface_config['port_type']
+            vulnerabilities.append({
+                'line': interface_config['line_number'],
+                'matched_text': f"interface {interface_name} - proxy-arp {status}",
+                'details': {
+                    'vulnerability': 'proxy_arp_enabled',
+                    'interface_name': interface_name,
+                    'interface_type': interface_config['port_type'],
+                    'status': status,
+                    'recommendation': f'Configure "no ip proxy-arp" on interface {interface_name}',
+                    'default_behavior': 'Cisco default: proxy-arp enabled',
+                    'line_number': interface_config['line_number']
+                }
             })
     
-    # 🔧 개선: 문제가 있는 인터페이스들을 하나로 통합하여 보고
-    if vulnerable_interfaces:
-        # 가장 중요한 인터페이스를 대표로 선택 (첫 번째 또는 외부 인터페이스)
-        primary_interface = vulnerable_interfaces[0]
-        
-        # 외부 인터페이스가 있으면 그것을 우선
-        network_analysis = _analyze_network_environment(context)
-        external_interfaces = set(network_analysis['external_interfaces'])
-        
-        for iface in vulnerable_interfaces:
-            if iface['name'] in external_interfaces:
-                primary_interface = iface
-                break
-        
-        return [{
-            'line': primary_interface['line_number'],
-            'matched_text': f"Multiple interfaces with Proxy ARP enabled",
-            'details': {
-                'vulnerability': 'proxy_arp_enabled_multiple',
-                'affected_interfaces': [iface['name'] for iface in vulnerable_interfaces],
-                'interface_count': len(vulnerable_interfaces),
-                'primary_interface': primary_interface['name'],
-                'status_breakdown': {
-                    'explicitly_enabled': len([i for i in vulnerable_interfaces if i['status'] == 'explicitly_enabled']),
-                    'default_enabled': len([i for i in vulnerable_interfaces if i['status'] == 'default_enabled'])
-                },
-                'recommendation': f'Add "no ip proxy-arp" to {len(vulnerable_interfaces)} interfaces: {", ".join([i["name"] for i in vulnerable_interfaces])}',
-                'default_behavior': 'Cisco default: proxy-arp enabled on all physical interfaces',
-                'interface_details': vulnerable_interfaces
-            }
-        }]
-    
-    return []
+    return vulnerabilities
 
 
 def check_nw_33(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """NW-33: ICMP unreachable, Redirect 차단 - 통합 보고 개선된 버전"""
+    """NW-33: ICMP unreachable, Redirect 차단 - 🔥 개별 인터페이스별 보고로 개선"""
+    vulnerabilities = []
     
     # 네트워크 환경 분석
     network_analysis = _analyze_network_environment(context)
     external_interfaces = set(network_analysis['external_interfaces'])
     
-    # 문제 있는 인터페이스들 수집
-    vulnerable_interfaces = []
-    
+    # 🔥 개선: 각 인터페이스별로 개별 취약점 보고
     for interface_name, interface_config in context.parsed_interfaces.items():
         # 서브인터페이스 제외
         if interface_config.get('is_subinterface', False):
@@ -1623,8 +1624,10 @@ def check_nw_33(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
         
         # 외부 인터페이스가 아니면 낮은 우선순위로 처리
         is_external = interface_name in external_interfaces
+        
+        # 외부 인터페이스가 아니고 외부 연결이 없으면 스킵
         if not is_external and not network_analysis['has_external_connection']:
-            continue  # 완전 내부 네트워크는 스킵
+            continue
             
         config_lines = interface_config.get('config_lines', [])
         
@@ -1642,71 +1645,36 @@ def check_nw_33(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
             # 외부 인터페이스는 높은 우선순위, 내부는 낮은 우선순위
             severity = 'High' if is_external else 'Medium'
             
-            vulnerable_interfaces.append({
-                'name': interface_name,
-                'line_number': interface_config['line_number'],
-                'is_external': is_external,
-                'severity': severity,
-                'issues': issues,
-                'type': interface_config['port_type']
-            })
-    
-    # 🔧 개선: 문제가 있는 인터페이스들을 심각도별로 그룹화하여 보고
-    if vulnerable_interfaces:
-        # 심각도별 그룹화
-        high_severity_interfaces = [i for i in vulnerable_interfaces if i['severity'] == 'High']
-        medium_severity_interfaces = [i for i in vulnerable_interfaces if i['severity'] == 'Medium']
-        
-        vulnerabilities = []
-        
-        # High 심각도가 있으면 High로 보고
-        if high_severity_interfaces:
-            primary_interface = high_severity_interfaces[0]
-            all_affected = [i['name'] for i in vulnerable_interfaces]
+            # 문제된 서비스들을 텍스트로 표시
+            services_text = []
+            if 'unreachables_enabled' in issues:
+                services_text.append('unreachables')
+            if 'redirects_enabled' in issues:
+                services_text.append('redirects')
             
             vulnerabilities.append({
-                'line': primary_interface['line_number'],
-                'matched_text': f"Multiple interfaces with ICMP services enabled",
+                'line': interface_config['line_number'],
+                'matched_text': f"interface {interface_name} - ICMP {'/'.join(services_text)} enabled",
                 'details': {
-                    'vulnerability': 'icmp_services_enabled_multiple',
-                    'affected_interfaces': all_affected,
-                    'interface_count': len(vulnerable_interfaces),
-                    'primary_interface': primary_interface['name'],
-                    'severity_breakdown': {
-                        'high_severity': len(high_severity_interfaces),
-                        'medium_severity': len(medium_severity_interfaces)
-                    },
-                    'external_interfaces': [i['name'] for i in high_severity_interfaces],
-                    'internal_interfaces': [i['name'] for i in medium_severity_interfaces],
-                    'recommendation': f'Disable ICMP services on {len(vulnerable_interfaces)} interfaces. Priority: External interfaces ({len(high_severity_interfaces)}) first.',
-                    'severity_adjusted': 'High',
-                    'interface_details': vulnerable_interfaces
+                    'vulnerability': 'icmp_services_enabled',
+                    'interface_name': interface_name,
+                    'interface_type': 'external' if is_external else 'internal',
+                    'port_type': interface_config['port_type'],
+                    'issues': issues,
+                    'unreachables_disabled': has_no_unreachables,
+                    'redirects_disabled': has_no_redirects,
+                    'recommendation': f'Configure on interface {interface_name}: ' + 
+                                    ', '.join([
+                                        'no ip unreachables' if 'unreachables_enabled' in issues else '',
+                                        'no ip redirects' if 'redirects_enabled' in issues else ''
+                                    ]).strip(', '),
+                    'severity_adjusted': severity,
+                    'line_number': interface_config['line_number']
                 }
             })
-        
-        # High가 없고 Medium만 있으면 Medium으로 보고
-        elif medium_severity_interfaces:
-            primary_interface = medium_severity_interfaces[0]
-            all_affected = [i['name'] for i in vulnerable_interfaces]
-            
-            vulnerabilities.append({
-                'line': primary_interface['line_number'],
-                'matched_text': f"Internal interfaces with ICMP services enabled",
-                'details': {
-                    'vulnerability': 'icmp_services_enabled_internal',
-                    'affected_interfaces': all_affected,
-                    'interface_count': len(vulnerable_interfaces),
-                    'primary_interface': primary_interface['name'],
-                    'network_type': 'internal',
-                    'recommendation': f'Consider disabling ICMP services on {len(vulnerable_interfaces)} internal interfaces for security best practices.',
-                    'severity_adjusted': 'Medium',
-                    'interface_details': vulnerable_interfaces
-                }
-            })
-        
-        return vulnerabilities
     
-    return []
+    return vulnerabilities
+
 
 
 def check_nw_34(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:

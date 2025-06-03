@@ -45,8 +45,8 @@ logger = setup_logger(__name__)
 analyzer = MultiFrameworkAnalyzer()
 
 # API 버전 정보
-API_VERSION = "1.3.0"  # 실제 다중 지침서 지원으로 버전 업데이트
-ANALYSIS_ENGINE_VERSION = "Multi-Framework 1.0"
+API_VERSION = "1.4.0"  # 실제 다중 지침서 지원으로 버전 업데이트
+ANALYSIS_ENGINE_VERSION = "Multi-Framework 1.1"
 
 
 @app.route('/api/v1/health', methods=['GET'])
@@ -71,13 +71,16 @@ def health_check():
             "version": API_VERSION,
             "engineVersion": ANALYSIS_ENGINE_VERSION,
             "timestamp": datetime.now().isoformat(),
-            "service": "KISA Network Security Config Analyzer (Multi-Framework)",
+            "service": "KISA Network Security Config Analyzer (Enhanced Multi-Framework)",
             "features": {
                 "logicalAnalysis": True,
                 "patternMatching": True,
                 "multiFrameworkSupport": True,
                 "frameworkComparison": True,
-                "contextualParsing": True
+                "contextualParsing": True,
+                "detailedReporting": True,  # 🔥 새로운 기능
+                "accurateLineNumbers": True,  # 🔥 새로운 기능
+                "consolidatedStatistics": True  # 🔥 새로운 기능
             },
             "supportedFrameworks": list(supported_sources.keys()),
             "implementedFrameworks": implemented_frameworks,
@@ -140,7 +143,7 @@ def get_frameworks():
 @app.route('/api/v1/config-analyze', methods=['POST'])
 def analyze_config():
     """
-    네트워크 장비 설정 파일 분석 메인 엔드포인트 (다중 지침서 완전 지원)
+    🔥 개선된 네트워크 장비 설정 파일 분석 메인 엔드포인트
     
     Request Body:
     {
@@ -152,7 +155,9 @@ def analyze_config():
             "specificRuleIds": ["N-01", "N-04"],
             "returnRawMatches": false,
             "enableLogicalAnalysis": true,
-            "includeRecommendations": true
+            "includeRecommendations": true,
+            "useConsolidation": true,  // 🔥 새로운 옵션: 통합 통계 사용 여부
+            "showDetailedInfo": true   // 🔥 새로운 옵션: 상세 정보 표시 여부
         }
     }
     """
@@ -164,8 +169,12 @@ def analyze_config():
                 "error": "JSON 데이터가 필요합니다"
             }), 400
         
-        # 지침서 파라미터 처리 - 실제 적용
+        # 지침서 파라미터 처리
         framework = request.json.get('framework', 'KISA').upper()
+        
+        # 🔥 새로운 옵션들 처리
+        use_consolidation = request.json.get('options', {}).get('useConsolidation', True)
+        show_detailed_info = request.json.get('options', {}).get('showDetailedInfo', True)
         
         # 지침서 유효성 검증
         try:
@@ -184,7 +193,7 @@ def analyze_config():
                 "error": f"{framework} 지침서는 아직 구현되지 않았습니다.",
                 "details": str(e),
                 "implementedFrameworks": [f for f in get_supported_sources().keys() 
-                                        if f == "KISA"]  # 현재 KISA만 완전 구현
+                                        if f in ["KISA", "NW", "CIS"]]
             }), 501
         
         # 요청 객체 생성 및 검증
@@ -211,13 +220,17 @@ def analyze_config():
                    f"장비 타입: {analysis_request.device_type}, "
                    f"설정 라인 수: {config_lines_count}")
         
-        # 🔥 실제 지침서별 분석 수행
-        analysis_result = analyzer.analyze_config(analysis_request, framework=framework)
+        # 🔥 개선된 분석 수행
+        analysis_result = analyzer.analyze_config(
+            analysis_request, 
+            framework=framework,
+            use_consolidation=use_consolidation
+        )
         
         # 컨텍스트 정보 추가
         context_info = _extract_context_info(analysis_request.config_text, analysis_request.device_type)
         
-        # 응답 생성
+        # 🔥 개선된 응답 생성
         response = AnalysisResponse(
             device_type=analysis_request.device_type,
             total_lines=config_lines_count,
@@ -227,26 +240,41 @@ def analyze_config():
             statistics=analysis_result.statistics
         )
         
-        # 응답 딕셔너리 생성 및 다중 지침서 정보 추가
+        # 응답 딕셔너리 생성 및 상세 정보 추가
         response_dict = response.to_dict()
         response_dict.update({
             "framework": framework,
             "frameworkInfo": get_source_info(framework),
             "engineVersion": ANALYSIS_ENGINE_VERSION,
             "contextInfo": context_info,
+            "analysisOptions": {
+                "useConsolidation": use_consolidation,
+                "showDetailedInfo": show_detailed_info,
+                "framework": framework
+            },
             "validationWarnings": validation_result.warnings if hasattr(validation_result, 'warnings') else [],
             "analysisDetails": {
                 "rulesApplied": analysis_result.statistics.total_rules_checked if analysis_result.statistics else 0,
+                "consolidationUsed": use_consolidation,
+                "individualFindings": getattr(analysis_result.statistics, 'total_individual_findings', None),
+                "consolidatedRules": getattr(analysis_result.statistics, 'consolidated_rules', None),
                 "logicalRulesUsed": sum(1 for v in analysis_result.vulnerabilities 
-                                      if hasattr(v, 'analysisType') and getattr(v, 'analysisType') == 'logical'),
+                                      if v.analysis_details and v.analysis_details.get('analysis_type') == 'logical'),
                 "patternRulesUsed": sum(1 for v in analysis_result.vulnerabilities 
-                                      if hasattr(v, 'analysisType') and getattr(v, 'analysisType') == 'pattern')
+                                      if v.analysis_details and v.analysis_details.get('analysis_type') == 'pattern')
             }
         })
         
+        # 🔥 상세 정보 표시 옵션에 따른 처리
+        if show_detailed_info:
+            # 상세 정보를 포함한 요약 생성
+            detailed_summary = _generate_detailed_summary(analysis_result.vulnerabilities)
+            response_dict["detailedSummary"] = detailed_summary
+        
         logger.info(f"분석 완료 - 지침서: {framework}, "
                    f"발견된 취약점: {response.issues_found}개, "
-                   f"분석 시간: {analysis_result.analysis_time:.2f}초")
+                   f"분석 시간: {analysis_result.analysis_time:.2f}초, "
+                   f"통합 통계: {use_consolidation}")
         
         return jsonify(response_dict)
     
@@ -261,6 +289,130 @@ def analyze_config():
             "framework": request.json.get('framework', 'KISA') if request.json else None
         }), 500
 
+@app.route('/api/v1/config-analyze/detailed', methods=['POST'])
+def analyze_config_detailed():
+    """
+    🔥 새로운 엔드포인트: 상세 분석 (통합하지 않은 개별 취약점들)
+    """
+    try:
+        # 기본 분석 수행하되 통합 통계를 사용하지 않음
+        original_request = request.json.copy()
+        if 'options' not in original_request:
+            original_request['options'] = {}
+        original_request['options']['useConsolidation'] = False
+        original_request['options']['showDetailedInfo'] = True
+        
+        # 임시로 request.json 수정
+        request.json = original_request
+        
+        return analyze_config()
+    
+    except Exception as e:
+        logger.error(f"상세 분석 중 오류 발생: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": "상세 분석 실패",
+            "details": str(e)
+        }), 500
+
+
+@app.route('/api/v1/config-analyze/summary', methods=['POST'])
+def analyze_config_summary():
+    """
+    🔥 새로운 엔드포인트: 요약 분석 (통합 통계만)
+    """
+    try:
+        # 기본 분석 수행하되 통합 통계를 사용
+        original_request = request.json.copy()
+        if 'options' not in original_request:
+            original_request['options'] = {}
+        original_request['options']['useConsolidation'] = True
+        original_request['options']['showDetailedInfo'] = False
+        
+        # 임시로 request.json 수정
+        request.json = original_request
+        
+        return analyze_config()
+    
+    except Exception as e:
+        logger.error(f"요약 분석 중 오류 발생: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": "요약 분석 실패",
+            "details": str(e)
+        }), 500
+
+
+def _generate_detailed_summary(vulnerabilities: List) -> Dict[str, Any]:
+    """🔥 상세 요약 정보 생성"""
+    
+    # 인터페이스별 문제 집계
+    interface_issues = {}
+    service_issues = {}
+    user_issues = {}
+    global_issues = []
+    
+    for vuln in vulnerabilities:
+        if vuln.analysis_details:
+            details = vuln.analysis_details
+            
+            # 인터페이스 관련 문제
+            if 'interface_name' in details:
+                interface_name = details['interface_name']
+                if interface_name not in interface_issues:
+                    interface_issues[interface_name] = []
+                interface_issues[interface_name].append({
+                    'ruleId': vuln.rule_id,
+                    'severity': vuln.severity,
+                    'issue': details.get('vulnerability', 'configuration_issue'),
+                    'line': vuln.line
+                })
+            
+            # 사용자 관련 문제
+            elif 'username' in details:
+                username = details['username']
+                if username not in user_issues:
+                    user_issues[username] = []
+                user_issues[username].append({
+                    'ruleId': vuln.rule_id,
+                    'severity': vuln.severity,
+                    'issue': details.get('vulnerability', 'user_configuration_issue'),
+                    'line': vuln.line
+                })
+            
+            # 서비스 관련 문제
+            elif 'service_name' in details:
+                service_name = details['service_name']
+                if service_name not in service_issues:
+                    service_issues[service_name] = []
+                service_issues[service_name].append({
+                    'ruleId': vuln.rule_id,
+                    'severity': vuln.severity,
+                    'issue': details.get('vulnerability', 'service_configuration_issue'),
+                    'line': vuln.line
+                })
+            
+            # 전역 설정 문제
+            else:
+                global_issues.append({
+                    'ruleId': vuln.rule_id,
+                    'severity': vuln.severity,
+                    'issue': details.get('vulnerability', 'global_configuration_issue'),
+                    'line': vuln.line
+                })
+    
+    return {
+        "interfaceIssues": interface_issues,
+        "userIssues": user_issues,
+        "serviceIssues": service_issues,
+        "globalIssues": global_issues,
+        "summary": {
+            "affectedInterfaces": len(interface_issues),
+            "affectedUsers": len(user_issues),
+            "affectedServices": len(service_issues),
+            "globalConfigurationIssues": len(global_issues)
+        }
+    }
 
 @app.route('/api/v1/rules', methods=['GET'])
 def get_rules():
@@ -530,7 +682,10 @@ def _extract_context_info(config_text: str, device_type: str) -> Dict[str, Any]:
             "configuredServices": len(context.parsed_services),
             "globalSettings": len(context.global_settings),
             "deviceType": device_type,
-            "configComplexity": _calculate_config_complexity(context)
+            "configComplexity": _calculate_config_complexity(context),
+            "hasVtyLines": len(context.vty_lines) > 0,
+            "hasSnmpCommunities": len(context.snmp_communities) > 0,
+            "totalUsers": len(context.parsed_users)
         }
     except Exception as e:
         logger.warning(f"컨텍스트 정보 추출 실패: {e}")
@@ -585,8 +740,9 @@ if __name__ == '__main__':
     debug = os.environ.get('FLASK_ENV') != 'production'
     
     # 시작 로그
-    logger.info(f"KISA 네트워크 보안 분석 API 시작 - Multi-Framework Version {API_VERSION}")
+    logger.info(f"KISA 네트워크 보안 분석 API 시작 - Enhanced Multi-Framework Version {API_VERSION}")
     logger.info(f"분석 엔진: {ANALYSIS_ENGINE_VERSION}")
+    logger.info(f"새로운 기능: 상세 정보 보존, 정확한 라인 번호, 통합 통계 옵션")
     
     try:
         # 지원 지침서 확인
@@ -604,6 +760,7 @@ if __name__ == '__main__':
                 logger.warning(f"❌ {fw} 지침서 로드 실패: {e}")
         
         logger.info(f"구현된 지침서: {', '.join(implemented)}")
+        logger.info(f"추가 엔드포인트: /api/v1/config-analyze/detailed, /api/v1/config-analyze/summary")
         
     except Exception as e:
         logger.error(f"지침서 초기화 중 오류: {e}")

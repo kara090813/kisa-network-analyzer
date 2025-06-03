@@ -1,14 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-analyzers/config_analyzer.py (Enhanced Multi-Framework Version with CIS Support Fixed)
-네트워크 장비 설정 파일 분석 엔진 - 다중 지침서 완전 지원 + CIS 룰셋 오류 수정
+analyzers/config_analyzer.py (개선된 버전)
+네트워크 장비 설정 파일 분석 엔진 - 상세 정보 보존 및 정확한 라인 번호 제공
 
-수정사항:
-- CIS 룰셋 import 추가
-- RuleLoader에서 CIS 지원 완전 구현
-- CIS 룰 개수 정확히 반영 (11개 → 실제 개수)
-- CISConfigContext 문제 해결
-- API 호출 시 CIS 지침서 선택 기능 활성화
+🔥 개선사항:
+- 개별 취약점의 상세 정보 보존
+- 정확한 라인 번호 제공
+- 통합 통계에서도 영향받는 항목들의 정보 유지
 """
 
 import re
@@ -34,7 +32,11 @@ from rules.cis_rules import CIS_RULES
 
 from models.analysis_request import AnalysisRequest
 from models.analysis_response import (
-    VulnerabilityIssue, AnalysisResult, AnalysisStatistics
+    VulnerabilityIssue, 
+    AnalysisResult, 
+    AnalysisStatistics,
+    calculate_consolidated_statistics,
+    enhance_vulnerability_with_line_info
 )
 
 
@@ -63,8 +65,8 @@ class RuleLoader:
             'description': 'Center for Internet Security Cisco IOS 12 Benchmark v4.0.0',
             'version': 'v4.0.0',
             'coverage': 'Industry standard Cisco security benchmarks',
-            'rules_count': len(CIS_RULES),  # 실제 CIS 룰 개수 반영
-            'status': 'active'  # planned → active로 변경
+            'rules_count': len(CIS_RULES),
+            'status': 'active'
         },
         'NIST': {
             'name': 'NIST Cybersecurity Framework',
@@ -85,7 +87,7 @@ class RuleLoader:
             return KISA_RULES.copy()
         elif framework == 'NW':
             return NW_RULES.copy()
-        elif framework == 'CIS':  # CIS 지원 추가
+        elif framework == 'CIS':
             return CIS_RULES.copy()
         elif framework == 'NIST':
             raise NotImplementedError(f"{framework} 지침서는 아직 구현되지 않았습니다")
@@ -146,45 +148,6 @@ class RuleLoader:
             
         except (ValueError, NotImplementedError):
             return {"totalRules": 0, "framework": framework}
-    
-    @classmethod
-    def get_rules_by_device_type(cls, framework: str, device_type: str) -> Dict[str, SecurityRule]:
-        """장비 타입별 룰 필터링"""
-        all_rules = cls.load_rules(framework)
-        return {
-            rule_id: rule for rule_id, rule in all_rules.items()
-            if device_type in rule.device_types
-        }
-    
-    @classmethod
-    def get_rules_by_severity(cls, framework: str, severity: str) -> Dict[str, SecurityRule]:
-        """심각도별 룰 필터링"""
-        all_rules = cls.load_rules(framework)
-        return {
-            rule_id: rule for rule_id, rule in all_rules.items()
-            if rule.severity == severity
-        }
-    
-    @classmethod
-    def get_rule_by_id(cls, framework: str, rule_id: str) -> Optional[SecurityRule]:
-        """특정 룰 조회"""
-        all_rules = cls.load_rules(framework)
-        return all_rules.get(rule_id)
-    
-    @classmethod
-    def validate_rule_compatibility(cls, framework: str, device_type: str, rule_ids: List[str]) -> Dict[str, bool]:
-        """룰 호환성 검증"""
-        all_rules = cls.load_rules(framework)
-        compatibility = {}
-        
-        for rule_id in rule_ids:
-            if rule_id in all_rules:
-                rule = all_rules[rule_id]
-                compatibility[rule_id] = device_type in rule.device_types
-            else:
-                compatibility[rule_id] = False
-        
-        return compatibility
 
 
 # 룰 로더 함수들을 전역으로 노출
@@ -200,21 +163,9 @@ def get_source_info(framework: str) -> Dict:
 def get_statistics(framework: str) -> Dict[str, Any]:
     return RuleLoader.get_statistics(framework)
 
-def get_rules_by_device_type(framework: str, device_type: str) -> Dict[str, SecurityRule]:
-    return RuleLoader.get_rules_by_device_type(framework, device_type)
-
-def get_rules_by_severity(framework: str, severity: str) -> Dict[str, SecurityRule]:
-    return RuleLoader.get_rules_by_severity(framework, severity)
-
-def get_rule_by_id(framework: str, rule_id: str) -> Optional[SecurityRule]:
-    return RuleLoader.get_rule_by_id(framework, rule_id)
-
-def validate_rule_compatibility(framework: str, device_type: str, rule_ids: List[str]) -> Dict[str, bool]:
-    return RuleLoader.validate_rule_compatibility(framework, device_type, rule_ids)
-
 
 class MultiFrameworkAnalyzer:
-    """다중 지침서 분석기 - 완전 구현 버전 (CIS 지원 완전 추가)"""
+    """🔥 개선된 다중 지침서 분석기 - 상세 정보 보존"""
     
     def __init__(self, default_framework: str = "KISA"):
         """
@@ -235,7 +186,7 @@ class MultiFrameworkAnalyzer:
             'framework_usage': defaultdict(int)
         }
         
-        self.logger.info(f"다중 지침서 분석기 초기화 완료 - 지원 지침서: {', '.join(self.supported_frameworks)}")
+        self.logger.info(f"개선된 다중 지침서 분석기 초기화 완료 - 지원 지침서: {', '.join(self.supported_frameworks)}")
         self.logger.info(f"기본 지침서: {self.default_framework}")
         
         # 각 지침서별 로드 상태 확인
@@ -248,13 +199,15 @@ class MultiFrameworkAnalyzer:
             except Exception as e:
                 self.logger.warning(f"❌ {framework} 지침서 로드 실패: {e}")
     
-    def analyze_config(self, request: AnalysisRequest, framework: Optional[str] = None) -> AnalysisResult:
+    def analyze_config(self, request: AnalysisRequest, framework: Optional[str] = None, 
+                      use_consolidation: bool = True) -> AnalysisResult:
         """
-        설정 파일 분석 - 지정된 지침서 사용
+        🔥 개선된 설정 파일 분석 - 상세 정보 보존 옵션 추가
         
         Args:
             request: 분석 요청 객체
             framework: 사용할 지침서 (None이면 기본값 사용)
+            use_consolidation: 통합 통계 사용 여부
             
         Returns:
             AnalysisResult: 분석 결과
@@ -295,8 +248,8 @@ class MultiFrameworkAnalyzer:
             }
             self.logger.info(f"특정 룰 필터링 적용: {len(device_rules)}개 룰")
         
-        # 분석 실행
-        vulnerabilities = self._perform_analysis(
+        # 🔥 개선된 분석 실행
+        raw_vulnerabilities = self._perform_enhanced_analysis(
             request.get_config_lines(), 
             device_rules, 
             config_context, 
@@ -304,8 +257,36 @@ class MultiFrameworkAnalyzer:
             target_framework
         )
         
-        # 통계 생성
-        statistics = self._generate_statistics(vulnerabilities, device_rules)
+        # 🔥 라인 번호 개선
+        enhanced_vulnerabilities = []
+        for vuln in raw_vulnerabilities:
+            enhanced_vuln = enhance_vulnerability_with_line_info(vuln, request.get_config_lines())
+            enhanced_vulnerabilities.append(enhanced_vuln)
+        
+        # 🔥 통합 통계 적용 (옵션)
+        if use_consolidation:
+            consolidation_result = calculate_consolidated_statistics(enhanced_vulnerabilities)
+            final_vulnerabilities = consolidation_result['consolidated_vulnerabilities']
+            
+            # 통합 통계로 AnalysisStatistics 생성
+            consolidated_stats = consolidation_result['statistics']
+            statistics = AnalysisStatistics(
+                total_rules_checked=len(device_rules),
+                rules_passed=len(device_rules) - consolidated_stats['total_vulnerabilities'],
+                rules_failed=consolidated_stats['total_vulnerabilities'],
+                high_severity_issues=consolidated_stats['high_severity'],
+                medium_severity_issues=consolidated_stats['medium_severity'],
+                low_severity_issues=consolidated_stats['low_severity'],
+                total_individual_findings=consolidated_stats['total_individual_findings'],
+                consolidated_rules=consolidated_stats['consolidated_rules']
+            )
+            
+            self.logger.info(f"통합 통계 적용 - 개별 발견: {consolidated_stats['total_individual_findings']}개, "
+                           f"통합 룰: {consolidated_stats['consolidated_rules']}개")
+        else:
+            # 기존 방식으로 통계 생성
+            final_vulnerabilities = enhanced_vulnerabilities
+            statistics = self._generate_legacy_statistics(final_vulnerabilities, device_rules)
         
         analysis_time = time.time() - start_time
         
@@ -314,16 +295,16 @@ class MultiFrameworkAnalyzer:
         self.analysis_stats['framework_usage'][target_framework] += 1
         
         self.logger.info(f"분석 완료 - 지침서: {target_framework}, "
-                        f"취약점: {len(vulnerabilities)}개, "
+                        f"최종 취약점: {len(final_vulnerabilities)}개, "
                         f"분석시간: {analysis_time:.2f}초")
         
         return AnalysisResult(
-            vulnerabilities=vulnerabilities,
+            vulnerabilities=final_vulnerabilities,
             analysis_time=analysis_time,
             statistics=statistics
         )
     
-    def _perform_analysis(
+    def _perform_enhanced_analysis(
         self, 
         config_lines: List[str], 
         rules: Dict[str, SecurityRule],
@@ -331,7 +312,7 @@ class MultiFrameworkAnalyzer:
         options,
         framework: str
     ) -> List[VulnerabilityIssue]:
-        """실제 분석 수행 (CIS 지원 포함)"""
+        """🔥 개선된 분석 수행 - 상세 정보 보존"""
         vulnerabilities = []
         
         logical_rules_used = 0
@@ -340,33 +321,18 @@ class MultiFrameworkAnalyzer:
         for rule_id, rule in rules.items():
             rule_vulnerabilities = []
             
-            # 1. 논리 기반 분석 (우선순위) - CIS 룰셋에서도 지원
+            # 1. 논리 기반 분석 (우선순위)
             if rule.logical_check_function:
                 try:
                     logical_results = rule.logical_check_function("", 0, context)
                     logical_rules_used += 1
                     
                     for result in logical_results:
-                        issue = VulnerabilityIssue(
-                            rule_id=rule.rule_id,
-                            severity=result.get('details', {}).get('severity_adjusted', rule.severity),
-                            line=result.get('line', 0),
-                            matched_text=result.get('matched_text', ''),
-                            description=rule.description,
-                            recommendation=rule.recommendation,
-                            reference=rule.reference,
-                            category=rule.category.value,
-                            raw_match=result.get('matched_text') if options.return_raw_matches else None
+                        # 🔥 개선된 취약점 객체 생성
+                        issue = self._create_enhanced_vulnerability(
+                            rule, result, framework, 'logical', options
                         )
-                        
-                        # 지침서 및 분석 상세 정보 추가
-                        issue_dict = issue.to_dict()
-                        issue_dict['framework'] = framework
-                        issue_dict['analysisType'] = 'logical'
-                        issue_dict['analysisDetails'] = result.get('details', {})
-                        
-                        enhanced_issue = VulnerabilityIssue.from_dict(issue_dict)
-                        rule_vulnerabilities.append(enhanced_issue)
+                        rule_vulnerabilities.append(issue)
                         
                 except Exception as e:
                     self.logger.error(f"논리 기반 분석 오류 ({rule_id}): {e}")
@@ -389,25 +355,21 @@ class MultiFrameworkAnalyzer:
                     for pattern in rule.compiled_patterns:
                         match = pattern.search(line)
                         if match:
-                            issue = VulnerabilityIssue(
-                                rule_id=rule.rule_id,
-                                severity=rule.severity,
-                                line=line_num,
-                                matched_text=match.group(0),
-                                description=rule.description,
-                                recommendation=rule.recommendation,
-                                reference=rule.reference,
-                                category=rule.category.value,
-                                raw_match=line.strip() if options.return_raw_matches else None
+                            # 🔥 패턴 매칭 결과도 개선된 형태로 생성
+                            pattern_result = {
+                                'line': line_num,
+                                'matched_text': match.group(0),
+                                'details': {
+                                    'pattern_matched': pattern.pattern,
+                                    'full_line': line.strip(),
+                                    'match_position': match.span()
+                                }
+                            }
+                            
+                            issue = self._create_enhanced_vulnerability(
+                                rule, pattern_result, framework, 'pattern', options
                             )
-                            
-                            # 지침서 정보 추가
-                            issue_dict = issue.to_dict()
-                            issue_dict['framework'] = framework
-                            issue_dict['analysisType'] = 'pattern'
-                            
-                            enhanced_issue = VulnerabilityIssue.from_dict(issue_dict)
-                            rule_vulnerabilities.append(enhanced_issue)
+                            rule_vulnerabilities.append(issue)
                             break
             
             vulnerabilities.extend(rule_vulnerabilities)
@@ -415,12 +377,92 @@ class MultiFrameworkAnalyzer:
         self.logger.info(f"분석 상세 - 논리 룰: {logical_rules_used}개, 패턴 룰: {pattern_rules_used}개")
         return vulnerabilities
     
-    def _generate_statistics(
+    def _create_enhanced_vulnerability(self, rule: SecurityRule, result: Dict[str, Any], 
+                                     framework: str, analysis_type: str, options) -> VulnerabilityIssue:
+        """🔥 개선된 취약점 객체 생성"""
+        
+        # 기본 정보 추출
+        line_number = result.get('line', 0)
+        matched_text = result.get('matched_text', '')
+        details = result.get('details', {})
+        
+        # 심각도 조정 (분석 상세 정보에서 조정된 심각도가 있는 경우)
+        severity = details.get('severity_adjusted', rule.severity)
+        
+        # 상세 분석 정보 구성
+        analysis_details = {
+            'analysis_type': analysis_type,
+            'framework': framework,
+            'rule_category': rule.category.value,
+            'original_line': line_number,
+            **details
+        }
+        
+        # 영향받는 항목 정보 구성
+        affected_items = None
+        summary_info = None
+        
+        if details:
+            # 인터페이스 관련 정보
+            if 'interface_name' in details:
+                affected_items = [{
+                    'type': 'interface',
+                    'name': details['interface_name'],
+                    'line': line_number
+                }]
+                summary_info = {
+                    'affected_type': 'interface',
+                    'affected_list': [details['interface_name']],
+                    'total_affected': 1
+                }
+            
+            # 사용자 관련 정보
+            elif 'username' in details:
+                affected_items = [{
+                    'type': 'user',
+                    'name': details['username'],
+                    'line': line_number
+                }]
+                summary_info = {
+                    'affected_type': 'user',
+                    'affected_list': [details['username']],
+                    'total_affected': 1
+                }
+            
+            # 서비스 관련 정보
+            elif 'service_name' in details:
+                affected_items = [{
+                    'type': 'service',
+                    'name': details['service_name'],
+                    'line': line_number
+                }]
+                summary_info = {
+                    'affected_type': 'service',
+                    'affected_list': [details['service_name']],
+                    'total_affected': 1
+                }
+        
+        return VulnerabilityIssue(
+            rule_id=rule.rule_id,
+            severity=severity,
+            line=line_number,
+            matched_text=matched_text,
+            description=rule.description,
+            recommendation=details.get('recommendation', rule.recommendation),
+            reference=rule.reference,
+            category=rule.category.value,
+            raw_match=result.get('matched_text') if options.return_raw_matches else None,
+            affected_items=affected_items,
+            summary_info=summary_info,
+            analysis_details=analysis_details
+        )
+    
+    def _generate_legacy_statistics(
         self, 
         vulnerabilities: List[VulnerabilityIssue], 
         rules: Dict[str, SecurityRule]
     ) -> AnalysisStatistics:
-        """분석 통계 생성"""
+        """기존 방식의 분석 통계 생성"""
         severity_counts = {"상": 0, "중": 0, "하": 0}
         
         for vuln in vulnerabilities:
@@ -441,7 +483,7 @@ class MultiFrameworkAnalyzer:
         )
     
     def get_supported_device_types(self, framework: str = None) -> List[str]:
-        """지원되는 장비 타입 반환 (CIS 지원 포함)"""
+        """지원되는 장비 타입 반환"""
         target_framework = (framework or self.default_framework).upper()
         
         try:
@@ -454,7 +496,7 @@ class MultiFrameworkAnalyzer:
             return ["Cisco", "Juniper", "Radware", "Passport", "Piolink", "HP", "Alcatel", "Extreme", "Dasan"]
     
     def get_available_rules(self, framework: str = None) -> List[Dict[str, Any]]:
-        """사용 가능한 룰 목록 반환 (CIS 지원 포함)"""
+        """사용 가능한 룰 목록 반환"""
         target_framework = (framework or self.default_framework).upper()
         
         try:
@@ -478,32 +520,9 @@ class MultiFrameworkAnalyzer:
         except:
             return []
     
-    def validate_config_syntax(self, config_text: str, device_type: str) -> List[Dict[str, Any]]:
-        """설정 파일 문법 검증"""
-        errors = []
-        lines = config_text.splitlines()
-        
-        for line_num, line in enumerate(lines, 1):
-            line = line.strip()
-            if not line or line.startswith('!'):
-                continue
-            
-            # 기본적인 문법 검증
-            if device_type == "Cisco":
-                # Cisco 특화 문법 검증
-                if line.startswith(' ') and not any(lines[i].strip().startswith(cmd) 
-                                                 for i in range(max(0, line_num-10), line_num-1)
-                                                 for cmd in ['interface', 'line', 'router', 'access-list']):
-                    errors.append({
-                        "line": line_num,
-                        "error": "Indented line without parent command",
-                        "text": line
-                    })
-        
-        return errors
-    
-    def analyze_single_line(self, line: str, device_type: str, rule_ids: Optional[List[str]] = None, framework: str = None) -> List[VulnerabilityIssue]:
-        """단일 라인 분석 (CIS 지원 포함)"""
+    def analyze_single_line(self, line: str, device_type: str, rule_ids: Optional[List[str]] = None, 
+                          framework: str = None) -> List[VulnerabilityIssue]:
+        """단일 라인 분석"""
         target_framework = (framework or self.default_framework).upper()
         
         try:
@@ -523,24 +542,22 @@ class MultiFrameworkAnalyzer:
                     for pattern in rule.compiled_patterns:
                         match = pattern.search(line)
                         if match:
-                            issue = VulnerabilityIssue(
-                                rule_id=rule.rule_id,
-                                severity=rule.severity,
-                                line=1,
-                                matched_text=match.group(0),
-                                description=rule.description,
-                                recommendation=rule.recommendation,
-                                reference=rule.reference,
-                                category=rule.category.value
+                            pattern_result = {
+                                'line': 1,
+                                'matched_text': match.group(0),
+                                'details': {
+                                    'pattern_matched': pattern.pattern,
+                                    'full_line': line.strip()
+                                }
+                            }
+                            
+                            # 단순한 옵션 객체 생성
+                            simple_options = type('Options', (), {'return_raw_matches': False})()
+                            
+                            issue = self._create_enhanced_vulnerability(
+                                rule, pattern_result, target_framework, 'pattern', simple_options
                             )
-                            
-                            # 지침서 정보 추가
-                            issue_dict = issue.to_dict()
-                            issue_dict['framework'] = target_framework
-                            issue_dict['analysisType'] = 'pattern'
-                            
-                            enhanced_issue = VulnerabilityIssue.from_dict(issue_dict)
-                            vulnerabilities.append(enhanced_issue)
+                            vulnerabilities.append(issue)
                             break
             
             return vulnerabilities
@@ -555,56 +572,9 @@ class MultiFrameworkAnalyzer:
             "defaultFramework": self.default_framework,
             "frameworkDetails": get_supported_sources()
         }
-    
-    def compare_frameworks(self, request: AnalysisRequest, frameworks: List[str]) -> Dict[str, AnalysisResult]:
-        """여러 지침서로 동시 분석 및 비교 (CIS 포함)"""
-        results = {}
-        
-        for framework in frameworks:
-            try:
-                result = self.analyze_config(request, framework)
-                results[framework] = result
-                self.logger.info(f"{framework} 분석 완료: {len(result.vulnerabilities)}개 취약점")
-            except Exception as e:
-                self.logger.error(f"{framework} 분석 실패: {e}")
-                results[framework] = None
-        
-        return results
-    
-    def get_framework_coverage(self, device_type: str) -> Dict[str, Dict[str, Any]]:
-        """장비 타입별 지침서 커버리지 정보 (CIS 포함)"""
-        coverage = {}
-        
-        for framework in self.supported_frameworks:
-            try:
-                stats = get_statistics(framework)
-                device_rules = get_rules_by_device_type(framework, device_type)
-                
-                coverage[framework] = {
-                    "totalRules": stats.get("totalRules", 0),
-                    "applicableRules": len(device_rules),
-                    "coverageRatio": len(device_rules) / max(stats.get("totalRules", 1), 1),
-                    "logicalRules": sum(1 for rule in device_rules.values() if rule.logical_check_function),
-                    "patternRules": sum(1 for rule in device_rules.values() if not rule.logical_check_function),
-                    "severityBreakdown": {
-                        "상": len([r for r in device_rules.values() if r.severity == "상"]),
-                        "중": len([r for r in device_rules.values() if r.severity == "중"]),
-                        "하": len([r for r in device_rules.values() if r.severity == "하"])
-                    }
-                }
-            except Exception as e:
-                self.logger.warning(f"{framework} 커버리지 계산 실패: {e}")
-                coverage[framework] = {
-                    "totalRules": 0,
-                    "applicableRules": 0,
-                    "coverageRatio": 0.0,
-                    "error": str(e)
-                }
-        
-        return coverage
 
 
-# 기존 호환성을 위한 별칭 - 수정됨
+# 기존 호환성을 위한 별칭
 class EnhancedConfigAnalyzer(MultiFrameworkAnalyzer):
     """Enhanced Config Analyzer - 기존 호환성 유지"""
     
