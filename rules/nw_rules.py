@@ -310,9 +310,11 @@ NW_RULES = {
         category=RuleCategory.LOG_MANAGEMENT,
         patterns=[],
         negative_patterns=[
-            r"logging\s+on",
-            r"logging\s+enable",
-            r"log\s+messages"
+            r"logging\s+buffered",
+            r"logging\s+host",
+            r"logging\s+console",
+            r"logging\s+trap",
+            r"logging\s+\d{1,3}(\.\d{1,3}){3}"
         ],
         device_types=["Cisco", "Juniper", "Piolink"],
         recommendation="로그 기록 정책을 수립하고 정책에 따른 로깅 설정을 한다",

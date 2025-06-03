@@ -775,7 +775,7 @@ def check_nw_13(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
     vulnerabilities = []
     
     # 기본 로깅 설정 확인
-    logging_enabled = any(line.strip().startswith('logging on') for line in context.config_lines)
+    logging_enabled = any(line.strip().startswith('logging') for line in context.config_lines)
     
     if not logging_enabled:
         vulnerabilities.append({
