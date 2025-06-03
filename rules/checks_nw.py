@@ -1395,26 +1395,76 @@ def check_nw_29(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
 
 
 def check_nw_30(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """NW-30: Directed-broadcast 차단 - 논리 기반 분석"""
+    """NW-30: Directed-broadcast 차단 - 버전별 기본값 고려 개선"""
     vulnerabilities = []
     
-    # Directed broadcast 설정 확인
+    # IOS 버전 확인
+    ios_version = context.ios_version or "15.0"
+    version_num = context.cisco_defaults._extract_version_number(ios_version)
+    
+    # 15.x에서는 기본값이 disabled이므로 덜 엄격하게 적용
+    strict_check = version_num < 12.0  # 12.0 이전에서만 엄격하게 체크
+    
     for interface_name, interface_config in context.parsed_interfaces.items():
-        directed_broadcast_disabled = False
+        # 서브인터페이스는 제외 (의미없음)
+        if interface_config.get('is_subinterface', False):
+            continue
+            
+        # 루프백, 관리 인터페이스 제외
+        if interface_config.get('is_loopback') or interface_config.get('is_management'):
+            continue
+            
+        config_lines = interface_config.get('config_lines', [])
         
-        for config_line in interface_config.get('config_lines', []):
-            if 'no ip directed-broadcast' in config_line:
-                directed_broadcast_disabled = True
-                break
+        # 명시적 설정 확인
+        directed_broadcast_explicitly_disabled = any('no ip directed-broadcast' in line for line in config_lines)
+        directed_broadcast_explicitly_enabled = any(
+            'ip directed-broadcast' in line and not line.strip().startswith('no ')
+            for line in config_lines
+        )
         
-        if not directed_broadcast_disabled and interface_config['port_type'] in ['FastEthernet', 'GigabitEthernet']:
+        # 실제 상태 판단 (버전별 기본값 고려)
+        if directed_broadcast_explicitly_disabled:
+            actual_state = False
+        elif directed_broadcast_explicitly_enabled:
+            actual_state = True
+        else:
+            # 기본값 적용 (버전별)
+            actual_state = context.get_service_state('directed_broadcast')
+        
+        # 취약점 판단
+        is_vulnerable = False
+        severity = "Medium"
+        
+        if directed_broadcast_explicitly_enabled:
+            # 명시적으로 활성화된 경우는 항상 취약
+            is_vulnerable = True
+            severity = "High"
+        elif actual_state and strict_check:
+            # 구버전에서 기본값으로 활성화된 경우
+            is_vulnerable = True
+            severity = "Medium"
+        elif actual_state and not strict_check:
+            # 신버전에서는 정보성만 (실제로는 기본값이 disabled)
+            is_vulnerable = True
+            severity = "Low"
+        
+        if is_vulnerable:
+            status = "explicitly_enabled" if directed_broadcast_explicitly_enabled else "default_state"
+            
             vulnerabilities.append({
                 'line': interface_config['line_number'],
                 'matched_text': f"interface {interface_name}",
                 'details': {
-                    'vulnerability': 'directed_broadcast_not_disabled',
+                    'vulnerability': 'directed_broadcast_enabled',
                     'interface_name': interface_name,
-                    'recommendation': 'Disable directed broadcast: no ip directed-broadcast'
+                    'status': status,
+                    'ios_version': ios_version,
+                    'version_based_default': actual_state,
+                    'strict_check': strict_check,
+                    'recommendation': 'Add: no ip directed-broadcast' if status == "default_state"
+                                    else 'Change to: no ip directed-broadcast',
+                    'severity_adjusted': severity
                 }
             })
     
@@ -1442,26 +1492,55 @@ def check_nw_31(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
 
 
 def check_nw_32(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """NW-32: Proxy ARP 차단 - 논리 기반 분석"""
+    """NW-32: Proxy ARP 차단 - 서브인터페이스 제외 개선"""
     vulnerabilities = []
     
-    # Proxy ARP 설정 확인
     for interface_name, interface_config in context.parsed_interfaces.items():
-        proxy_arp_disabled = False
+        # 🔧 개선: 서브인터페이스 제외 (Proxy ARP는 물리 인터페이스에서만 의미있음)
+        if interface_config.get('is_subinterface', False):
+            continue
+            
+        # 물리 인터페이스만 체크
+        if interface_config['port_type'] not in ['FastEthernet', 'GigabitEthernet', 'TenGigabitEthernet']:
+            continue
+            
+        # 루프백, 관리 인터페이스 제외
+        if interface_config.get('is_loopback') or interface_config.get('is_management'):
+            continue
+            
+        config_lines = interface_config.get('config_lines', [])
         
-        for config_line in interface_config.get('config_lines', []):
-            if 'no ip proxy-arp' in config_line:
-                proxy_arp_disabled = True
-                break
+        # 명시적 설정 확인
+        proxy_arp_explicitly_disabled = any('no ip proxy-arp' in line for line in config_lines)
+        proxy_arp_explicitly_enabled = any(
+            'ip proxy-arp' in line and not line.strip().startswith('no ') 
+            for line in config_lines
+        )
         
-        if not proxy_arp_disabled and interface_config['port_type'] in ['FastEthernet', 'GigabitEthernet']:
+        # 실제 상태 판단 (기본값 고려)
+        if proxy_arp_explicitly_disabled:
+            actual_state = False  # 비활성화됨
+        elif proxy_arp_explicitly_enabled:
+            actual_state = True   # 명시적 활성화
+        else:
+            # 기본값 적용: Cisco는 기본적으로 proxy-arp enabled
+            actual_state = context.get_service_state('proxy_arp')
+        
+        # 보안 기준: proxy-arp는 비활성화되어야 함
+        if actual_state:  # 활성화된 경우 취약
+            status = "explicitly_enabled" if proxy_arp_explicitly_enabled else "default_enabled"
+            
             vulnerabilities.append({
                 'line': interface_config['line_number'],
                 'matched_text': f"interface {interface_name}",
                 'details': {
-                    'vulnerability': 'proxy_arp_not_disabled',
+                    'vulnerability': 'proxy_arp_enabled',
                     'interface_name': interface_name,
-                    'recommendation': 'Disable proxy ARP: no ip proxy-arp'
+                    'interface_type': 'physical',
+                    'status': status,
+                    'recommendation': 'Add: no ip proxy-arp' if status == "default_enabled" 
+                                    else 'Change to: no ip proxy-arp',
+                    'default_behavior': 'Cisco default: proxy-arp enabled'
                 }
             })
     
@@ -1469,35 +1548,30 @@ def check_nw_32(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
 
 
 def check_nw_33(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """NW-33: ICMP unreachable, Redirect 차단 - 선택적 적용"""
+    """NW-33: ICMP unreachable, Redirect 차단 - 외부 인터페이스만 선별적 적용"""
     vulnerabilities = []
     
-    # 외부 연결 인터페이스만 체크
+    # 네트워크 환경 분석 (기존 함수 활용)
+    network_analysis = _analyze_network_environment(context)
+    external_interfaces = set(network_analysis['external_interfaces'])
+    
     for interface_name, interface_config in context.parsed_interfaces.items():
-        # 논리적 인터페이스 제외
-        if interface_config['is_loopback'] or interface_config.get('is_tunnel'):
+        # 🔧 개선: 서브인터페이스 제외
+        if interface_config.get('is_subinterface', False):
+            continue
+            
+        # 루프백, 관리 인터페이스 제외
+        if interface_config.get('is_loopback') or interface_config.get('is_management'):
             continue
         
-        # 외부 연결 여부 확인
-        is_external = False
-        description = interface_config.get('description', '').lower()
+        # 🔧 개선: 외부 인터페이스 우선 체크, 내부는 권장 수준
+        is_external = interface_name in external_interfaces
         
-        # 외부 연결 키워드
-        if any(word in description for word in ['isp', 'internet', 'wan', 'external', 'outside']):
-            is_external = True
-        
-        # NAT outside 인터페이스
+        # 외부 인터페이스가 아니면 낮은 우선순위로 처리
+        if not is_external and not network_analysis['has_external_connection']:
+            continue  # 완전 내부 네트워크는 스킵
+            
         config_lines = interface_config.get('config_lines', [])
-        if any('nat outside' in line for line in config_lines):
-            is_external = True
-        
-        # 공인 IP 대역 확인
-        ip_address = interface_config.get('ip_address', '')
-        if ip_address and not _is_private_ip(ip_address):
-            is_external = True
-        
-        if not is_external:
-            continue
         
         # ICMP 설정 확인
         has_no_unreachables = any('no ip unreachables' in line for line in config_lines)
@@ -1510,15 +1584,19 @@ def check_nw_33(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
             issues.append('redirects_enabled')
         
         if issues:
+            # 외부 인터페이스는 높은 우선순위, 내부는 낮은 우선순위
+            severity = 'High' if is_external else 'Medium'
+            
             vulnerabilities.append({
                 'line': interface_config['line_number'],
                 'matched_text': f"interface {interface_name}",
                 'details': {
                     'interface_name': interface_name,
-                    'interface_type': 'external',
+                    'interface_type': 'external' if is_external else 'internal',
                     'issues': issues,
-                    'recommendation': 'Disable ICMP unreachables and redirects on external interfaces',
-                    'severity_adjusted': 'Medium'
+                    'recommendation': 'Disable ICMP unreachables and redirects' + 
+                                    (' (Critical for external interfaces)' if is_external else ' (Recommended)'),
+                    'severity_adjusted': severity
                 }
             })
     
@@ -1551,19 +1629,47 @@ def check_nw_34(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
 
 
 def check_nw_35(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """NW-35: Domain lookup 차단 - 논리 기반 분석"""
+    """NW-35: Domain lookup 차단 - 오탐 수정된 버전"""
     vulnerabilities = []
     
-    # Domain lookup 설정 확인
-    domain_lookup_enabled = context.parsed_services.get('domain_lookup', True)  # 기본값은 enabled
+    # 🔧 수정: 명시적 설정 우선 확인
+    domain_lookup_explicitly_disabled = any(
+        'no ip domain-lookup' in line or 'no ip domain lookup' in line 
+        for line in context.config_lines
+    )
     
-    if domain_lookup_enabled:
+    domain_lookup_explicitly_enabled = any(
+        ('ip domain-lookup' in line or 'ip domain lookup' in line) and 
+        not line.strip().startswith('no ')
+        for line in context.config_lines
+    )
+    
+    # 실제 상태 판단
+    if domain_lookup_explicitly_disabled:
+        actual_state = False  # 비활성화됨 (양호)
+    elif domain_lookup_explicitly_enabled:
+        actual_state = True   # 명시적 활성화됨 (취약)
+    else:
+        # 기본값 적용: Cisco는 기본적으로 domain-lookup enabled
+        actual_state = context.get_service_state('domain_lookup')
+    
+    # 보안 기준: domain-lookup은 비활성화되어야 함
+    if actual_state:  # 활성화된 경우만 취약점으로 보고
+        status = "explicitly_enabled" if domain_lookup_explicitly_enabled else "default_enabled"
+        
         vulnerabilities.append({
             'line': 0,
-            'matched_text': 'Domain lookup enabled',
+            'matched_text': f'Domain lookup {status}',
             'details': {
                 'vulnerability': 'domain_lookup_enabled',
-                'recommendation': 'Disable domain lookup: no ip domain-lookup'
+                'status': status,
+                'recommendation': 'Add: no ip domain-lookup' if status == "default_enabled" 
+                                else 'Keep: no ip domain-lookup setting',
+                'default_behavior': 'Cisco default: domain-lookup enabled',
+                'current_config_check': {
+                    'explicitly_disabled': domain_lookup_explicitly_disabled,
+                    'explicitly_enabled': domain_lookup_explicitly_enabled
+                }
             }
         })
     

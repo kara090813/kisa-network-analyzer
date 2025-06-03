@@ -561,6 +561,8 @@ def check_unused_interface_shutdown(line: str, line_num: int, context: ConfigCon
             })
     
     return vulnerabilities
+
+
 def _analyze_interface_usage(interface_name, interface_config, sub_interfaces, referenced_interfaces, context):
     """인터페이스 사용 여부 정교한 분석"""
     
@@ -1027,26 +1029,76 @@ def check_cdp_service_status(line: str, line_num: int, context: ConfigContext) -
 
 
 def check_directed_broadcast_status(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """N-30: Directed-broadcast 차단 - 논리 기반 분석"""
+    """N-30: Directed-broadcast 차단 - 버전별 기본값 고려 개선"""
     vulnerabilities = []
     
-    # Directed broadcast 설정 확인
+    # IOS 버전 확인
+    ios_version = context.ios_version or "15.0"
+    version_num = context.cisco_defaults._extract_version_number(ios_version)
+    
+    # 15.x에서는 기본값이 disabled이므로 덜 엄격하게 적용
+    strict_check = version_num < 12.0  # 12.0 이전에서만 엄격하게 체크
+    
     for interface_name, interface_config in context.parsed_interfaces.items():
-        directed_broadcast_disabled = False
+        # 서브인터페이스는 제외 (의미없음)
+        if interface_config.get('is_subinterface', False):
+            continue
+            
+        # 루프백, 관리 인터페이스 제외
+        if interface_config.get('is_loopback') or interface_config.get('is_management'):
+            continue
+            
+        config_lines = interface_config.get('config_lines', [])
         
-        for config_line in interface_config.get('config_lines', []):
-            if 'no ip directed-broadcast' in config_line:
-                directed_broadcast_disabled = True
-                break
+        # 명시적 설정 확인
+        directed_broadcast_explicitly_disabled = any('no ip directed-broadcast' in line for line in config_lines)
+        directed_broadcast_explicitly_enabled = any(
+            'ip directed-broadcast' in line and not line.strip().startswith('no ')
+            for line in config_lines
+        )
         
-        if not directed_broadcast_disabled and interface_config['port_type'] in ['FastEthernet', 'GigabitEthernet']:
+        # 실제 상태 판단 (버전별 기본값 고려)
+        if directed_broadcast_explicitly_disabled:
+            actual_state = False
+        elif directed_broadcast_explicitly_enabled:
+            actual_state = True
+        else:
+            # 기본값 적용 (버전별)
+            actual_state = context.get_service_state('directed_broadcast')
+        
+        # 취약점 판단
+        is_vulnerable = False
+        severity = "Medium"
+        
+        if directed_broadcast_explicitly_enabled:
+            # 명시적으로 활성화된 경우는 항상 취약
+            is_vulnerable = True
+            severity = "High"
+        elif actual_state and strict_check:
+            # 구버전에서 기본값으로 활성화된 경우
+            is_vulnerable = True
+            severity = "Medium"
+        elif actual_state and not strict_check:
+            # 신버전에서는 정보성만 (실제로는 기본값이 disabled)
+            is_vulnerable = True
+            severity = "Low"
+        
+        if is_vulnerable:
+            status = "explicitly_enabled" if directed_broadcast_explicitly_enabled else "default_state"
+            
             vulnerabilities.append({
                 'line': interface_config['line_number'],
                 'matched_text': f"interface {interface_name}",
                 'details': {
                     'vulnerability': 'directed_broadcast_not_disabled',
                     'interface_name': interface_name,
-                    'recommendation': 'Disable directed broadcast: no ip directed-broadcast'
+                    'status': status,
+                    'ios_version': ios_version,
+                    'version_based_default': actual_state,
+                    'strict_check': strict_check,
+                    'recommendation': 'Add: no ip directed-broadcast' if status == "default_state"
+                                    else 'Change to: no ip directed-broadcast',
+                    'severity_adjusted': severity
                 }
             })
     
@@ -1054,30 +1106,56 @@ def check_directed_broadcast_status(line: str, line_num: int, context: ConfigCon
 
 
 def check_source_routing_status(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """N-31: Source 라우팅 차단 - 논리 기반 분석"""
+    """N-31: Source 라우팅 차단 - 개선된 논리 기반 분석"""
     vulnerabilities = []
     
-    # Source routing 설정 확인
-    source_routing_disabled = any('no ip source-route' in line for line in context.config_lines)
+    # 전역 source routing 설정 확인
+    source_routing_explicitly_disabled = any('no ip source-route' in line for line in context.config_lines)
+    source_routing_explicitly_enabled = any(
+        'ip source-route' in line and not line.strip().startswith('no ')
+        for line in context.config_lines
+    )
     
-    if not source_routing_disabled:
+    # 실제 상태 판단
+    if source_routing_explicitly_disabled:
+        actual_state = False  # 비활성화됨 (양호)
+    elif source_routing_explicitly_enabled:
+        actual_state = True   # 명시적 활성화됨 (취약)
+    else:
+        # 기본값 적용: Cisco는 기본적으로 source-route enabled
+        actual_state = context.get_service_state('source_route')
+    
+    # 보안 기준: source routing은 비활성화되어야 함
+    if actual_state:  # 활성화된 경우 취약점으로 보고
+        status = "explicitly_enabled" if source_routing_explicitly_enabled else "default_enabled"
+        
         vulnerabilities.append({
             'line': 0,
-            'matched_text': 'Source routing not disabled',
+            'matched_text': f'Source routing {status}',
             'details': {
                 'vulnerability': 'source_routing_enabled',
-                'recommendation': 'Disable source routing: no ip source-route'
+                'status': status,
+                'scope': 'global',
+                'recommendation': 'Add: no ip source-route' if status == "default_enabled" 
+                                else 'Change to: no ip source-route',
+                'default_behavior': 'Cisco default: source-route enabled',
+                'security_impact': 'Allows packet routing manipulation attacks'
             }
         })
     
     return vulnerabilities
 
 
+
 def check_proxy_arp_status(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """N-32: Proxy ARP 차단 - 기본값 고려 개선된 버전"""
+    """N-32: Proxy ARP 차단 - 서브인터페이스 제외 개선된 버전"""
     vulnerabilities = []
     
     for interface_name, interface_config in context.parsed_interfaces.items():
+        # 🔧 개선: 서브인터페이스 제외 (Proxy ARP는 물리 인터페이스에서만 의미있음)
+        if interface_config.get('is_subinterface', False):
+            continue
+            
         # 물리 인터페이스만 체크
         if interface_config['port_type'] not in ['FastEthernet', 'GigabitEthernet', 'TenGigabitEthernet']:
             continue
@@ -1114,6 +1192,7 @@ def check_proxy_arp_status(line: str, line_num: int, context: ConfigContext) -> 
                 'details': {
                     'vulnerability': 'proxy_arp_enabled',
                     'interface_name': interface_name,
+                    'interface_type': 'physical',
                     'status': status,
                     'recommendation': 'Add: no ip proxy-arp' if status == "default_enabled" 
                                     else 'Change to: no ip proxy-arp',
@@ -1125,30 +1204,58 @@ def check_proxy_arp_status(line: str, line_num: int, context: ConfigContext) -> 
 
 
 def check_icmp_services_status(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """N-33: ICMP unreachable, Redirect 차단 - 논리 기반 분석"""
+    """N-33: ICMP unreachable, Redirect 차단 - 외부 인터페이스만 선별적 적용"""
     vulnerabilities = []
     
-    # ICMP unreachable, redirect 설정 확인
+    # 네트워크 환경 분석
+    network_analysis = _analyze_network_environment_kisa(context)
+    external_interfaces = set(network_analysis['external_interfaces'])
+    
     for interface_name, interface_config in context.parsed_interfaces.items():
-        unreachables_disabled = False
-        redirects_disabled = False
+        # 🔧 개선: 서브인터페이스 제외
+        if interface_config.get('is_subinterface', False):
+            continue
+            
+        # 루프백, 관리 인터페이스 제외
+        if interface_config.get('is_loopback') or interface_config.get('is_management'):
+            continue
         
-        for config_line in interface_config.get('config_lines', []):
-            if 'no ip unreachables' in config_line:
-                unreachables_disabled = True
-            if 'no ip redirects' in config_line:
-                redirects_disabled = True
+        # 🔧 개선: 외부 인터페이스 우선 체크, 내부는 권장 수준
+        is_external = interface_name in external_interfaces
         
-        if not unreachables_disabled or not redirects_disabled:
+        # 외부 인터페이스가 아니면 낮은 우선순위로 처리
+        if not is_external and not network_analysis['has_external_connection']:
+            continue  # 완전 내부 네트워크는 스킵
+            
+        config_lines = interface_config.get('config_lines', [])
+        
+        # ICMP 설정 확인
+        has_no_unreachables = any('no ip unreachables' in line for line in config_lines)
+        has_no_redirects = any('no ip redirects' in line for line in config_lines)
+        
+        issues = []
+        if not has_no_unreachables:
+            issues.append('unreachables_enabled')
+        if not has_no_redirects:
+            issues.append('redirects_enabled')
+        
+        if issues:
+            # 외부 인터페이스는 높은 우선순위, 내부는 낮은 우선순위
+            severity = 'High' if is_external else 'Medium'
+            
             vulnerabilities.append({
                 'line': interface_config['line_number'],
                 'matched_text': f"interface {interface_name}",
                 'details': {
                     'vulnerability': 'icmp_services_not_disabled',
                     'interface_name': interface_name,
-                    'unreachables_disabled': unreachables_disabled,
-                    'redirects_disabled': redirects_disabled,
-                    'recommendation': 'Disable ICMP unreachables and redirects: no ip unreachables, no ip redirects'
+                    'interface_type': 'external' if is_external else 'internal',
+                    'issues': issues,
+                    'unreachables_disabled': has_no_unreachables,
+                    'redirects_disabled': has_no_redirects,
+                    'recommendation': 'Disable ICMP unreachables and redirects: no ip unreachables, no ip redirects' + 
+                                    (' (Critical for external interfaces)' if is_external else ' (Recommended)'),
+                    'severity_adjusted': severity
                 }
             })
     
@@ -1181,19 +1288,47 @@ def check_identd_service_status(line: str, line_num: int, context: ConfigContext
 
 
 def check_domain_lookup_status(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """N-35: Domain lookup 차단 - 논리 기반 분석"""
+    """N-35: Domain lookup 차단 - 오탐 수정된 버전"""
     vulnerabilities = []
     
-    # Domain lookup 설정 확인
-    domain_lookup_enabled = context.parsed_services.get('domain_lookup', True)  # 기본값은 enabled
+    # 🔧 수정: 명시적 설정 우선 확인
+    domain_lookup_explicitly_disabled = any(
+        'no ip domain-lookup' in line or 'no ip domain lookup' in line 
+        for line in context.config_lines
+    )
     
-    if domain_lookup_enabled:
+    domain_lookup_explicitly_enabled = any(
+        ('ip domain-lookup' in line or 'ip domain lookup' in line) and 
+        not line.strip().startswith('no ')
+        for line in context.config_lines
+    )
+    
+    # 실제 상태 판단
+    if domain_lookup_explicitly_disabled:
+        actual_state = False  # 비활성화됨 (양호)
+    elif domain_lookup_explicitly_enabled:
+        actual_state = True   # 명시적 활성화됨 (취약)
+    else:
+        # 기본값 적용: Cisco는 기본적으로 domain-lookup enabled
+        actual_state = context.get_service_state('domain_lookup')
+    
+    # 보안 기준: domain-lookup은 비활성화되어야 함
+    if actual_state:  # 활성화된 경우만 취약점으로 보고
+        status = "explicitly_enabled" if domain_lookup_explicitly_enabled else "default_enabled"
+        
         vulnerabilities.append({
             'line': 0,
-            'matched_text': 'Domain lookup enabled',
+            'matched_text': f'Domain lookup {status}',
             'details': {
                 'vulnerability': 'domain_lookup_enabled',
-                'recommendation': 'Disable domain lookup: no ip domain-lookup'
+                'status': status,
+                'recommendation': 'Add: no ip domain-lookup' if status == "default_enabled" 
+                                else 'Keep: no ip domain-lookup setting',
+                'default_behavior': 'Cisco default: domain-lookup enabled',
+                'current_config_check': {
+                    'explicitly_disabled': domain_lookup_explicitly_disabled,
+                    'explicitly_enabled': domain_lookup_explicitly_enabled
+                }
             }
         })
     
@@ -1225,8 +1360,16 @@ def check_mask_reply_status(line: str, line_num: int, context: ConfigContext) ->
     vulnerabilities = []
     
     for interface_name, interface_config in context.parsed_interfaces.items():
+        # 서브인터페이스 제외
+        if interface_config.get('is_subinterface', False):
+            continue
+            
         # 물리 인터페이스만 체크
         if interface_config['port_type'] not in ['FastEthernet', 'GigabitEthernet', 'TenGigabitEthernet']:
+            continue
+            
+        # 루프백, 관리 인터페이스 제외
+        if interface_config.get('is_loopback') or interface_config.get('is_management'):
             continue
             
         config_lines = interface_config.get('config_lines', [])
@@ -1255,12 +1398,12 @@ def check_mask_reply_status(line: str, line_num: int, context: ConfigContext) ->
                 'line': interface_config['line_number'],
                 'matched_text': f"interface {interface_name}",
                 'details': {
-                    'vulnerability': 'mask_reply_enabled',
+                    'vulnerability': 'mask_reply_not_disabled',
                     'interface_name': interface_name,
                     'status': status,
+                    'ios_version': context.ios_version,
                     'recommendation': 'Add: no ip mask-reply' if status == "default_enabled"
                                     else 'Change to: no ip mask-reply',
-                    'ios_version': context.ios_version,
                     'default_behavior': f'IOS {context.ios_version}: mask-reply default {"enabled" if actual_state else "disabled"}'
                 }
             })
@@ -1326,4 +1469,50 @@ def _is_critical_interface(interface_name: str, device_type: str) -> bool:
         if interface_lower.startswith('serial'):
             return True
     
+    return False
+
+# KISA 전용 헬퍼 함수
+def _analyze_network_environment_kisa(context: ConfigContext) -> Dict[str, Any]:
+    """네트워크 환경 분석 - KISA 버전"""
+    external_interfaces = []
+    has_nat = False
+    has_public_ip = False
+    
+    for interface_name, interface_config in context.parsed_interfaces.items():
+        # NAT outside 인터페이스 확인
+        config_lines = interface_config.get('config_lines', [])
+        if any('nat outside' in line for line in config_lines):
+            external_interfaces.append(interface_name)
+            has_nat = True
+        
+        # 공인 IP 확인
+        ip_address = interface_config.get('ip_address', '')
+        if ip_address and not _is_private_ip_kisa(ip_address):
+            external_interfaces.append(interface_name)
+            has_public_ip = True
+        
+        # 설명 기반 외부 인터페이스 판단
+        description = interface_config.get('description', '').lower()
+        external_keywords = ['isp', 'internet', 'wan', 'external', 'outside', 'uplink']
+        if any(keyword in description for keyword in external_keywords):
+            external_interfaces.append(interface_name)
+    
+    return {
+        'has_external_connection': len(external_interfaces) > 0,
+        'external_interfaces': list(set(external_interfaces)),
+        'has_nat': has_nat,
+        'has_public_ip': has_public_ip
+    }
+
+
+def _is_private_ip_kisa(ip_address: str) -> bool:
+    """사설 IP 대역 확인 - KISA 버전"""
+    import re
+    
+    if re.match(r'^10\.', ip_address):
+        return True
+    if re.match(r'^172\.(1[6-9]|2[0-9]|3[0-1])\.', ip_address):
+        return True
+    if re.match(r'^192\.168\.', ip_address):
+        return True
     return False

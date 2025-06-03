@@ -135,7 +135,7 @@ def parse_config_context(config_text: str, device_type: str) -> ConfigContext:
 
 
 def _parse_cisco_config_complete(context: ConfigContext):
-    """Cisco 설정 완전 파싱 - 개선된 버전"""
+    """Cisco 설정 완전 파싱 - Domain lookup 버그 수정"""
     lines = context.config_lines
     current_interface = None
     interface_config = {}
@@ -263,6 +263,22 @@ def _parse_cisco_config_complete(context: ConfigContext):
         elif in_vty_section and not original_line.startswith(' ') and line and not line.startswith('!'):
             in_vty_section = False
             current_section = None
+        
+        # 🔧 수정된 부분: Domain lookup 파싱 로직
+        elif line.startswith('no ip domain-lookup'):
+            context.parsed_services['domain_lookup'] = False  # 명시적 비활성화
+        elif line.startswith('ip domain-lookup'):
+            context.parsed_services['domain_lookup'] = True   # 명시적 활성화
+        elif line.startswith('no ip domain lookup'):  # 공백 포함 버전
+            context.parsed_services['domain_lookup'] = False
+        elif line.startswith('ip domain lookup'):
+            context.parsed_services['domain_lookup'] = True
+            
+        # 🔧 수정된 부분: Source routing 파싱 로직 (전역 설정)
+        elif line.startswith('no ip source-route'):
+            context.parsed_services['source_route'] = False
+        elif line.startswith('ip source-route'):
+            context.parsed_services['source_route'] = True
         
         # 사용자 계정 파싱 개선
         elif line.startswith('username '):
