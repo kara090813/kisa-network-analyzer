@@ -282,8 +282,8 @@ def check_nw_05(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
         issues = []
         
         # Access-class 확인
-        if not vty_line['has_access_class']:
-            issues.append('no_access_class')
+        if not vty_line['has_access-class']:
+            issues.append('no_access-class')
         
         # Transport input 확인  
         transport_input = vty_line.get('transport_input', [])
@@ -301,9 +301,9 @@ def check_nw_05(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
                 'details': {
                     'issues': issues,
                     'vty_config': vty_line,
-                    'has_access_class': vty_line['has_access_class'],
+                    'has_access-class': vty_line['has_access-class'],
                     'transport_input': transport_input,
-                    'access_class': vty_line.get('access_class'),
+                    'access-class': vty_line.get('access-class'),
                     'recommendation': 'VTY 라인에 access-class를 설정하여 접속 가능한 IP를 제한하세요.'
                 }
             }
