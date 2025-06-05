@@ -292,42 +292,65 @@ def check_nw_05(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
 
 
 def check_nw_06(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """NW-06: Session Timeout 설정 - 논리 기반 분석"""
+    """NW-06: Session Timeout 설정 - 논리 기반 분석 (VTY, CON, AUX 라인 모두 검사)"""
     vulnerabilities = []
     
-    for vty_line in context.vty_lines:
-        exec_timeout = vty_line.get('exec_timeout')  # Expected: (minutes, seconds)
+    # 검사할 라인 타입들을 모두 수집
+    all_lines = []
+    
+    # VTY 라인들 추가
+    if hasattr(context, 'vty_lines') and context.vty_lines:
+        all_lines.extend([('VTY', line) for line in context.vty_lines])
+    
+    # CON 라인들 추가
+    if hasattr(context, 'con_lines') and context.con_lines:
+        all_lines.extend([('CON', line) for line in context.con_lines])
+    
+    # AUX 라인들 추가  
+    if hasattr(context, 'aux_lines') and context.aux_lines:
+        all_lines.extend([('AUX', line) for line in context.aux_lines])
+    
+    # 통합된 라인들에 대해 검사 수행
+    for line_type, line_config in all_lines:
+        exec_timeout = line_config.get('exec_timeout')  # Expected: (minutes, seconds)
 
         if exec_timeout is None:
             vulnerabilities.append({
-                'line': vty_line['line_number'],
-                'matched_text': vty_line['line'],
+                'line': line_config['line_number'],
+                'matched_text': line_config['line'],
                 'details': {
                     'vulnerability': 'no_exec_timeout',
+                    'line_type': line_type,
                     'recommendation': 'Set exec-timeout to 5 minutes (exec-timeout 5 0)'
                 }
             })
         elif exec_timeout == (0, 0):
             vulnerabilities.append({
-                'line': vty_line['line_number'],
-                'matched_text': vty_line['line'],
+                'line': line_config['line_number'],
+                'matched_text': line_config['line'],
                 'details': {
                     'vulnerability': 'infinite_timeout',
+                    'line_type': line_type,
                     'timeout_value': '0 0',
                     'recommendation': 'Set exec-timeout to 5 minutes (exec-timeout 5 0)'
                 }
             })
         else:
+            # exec-timeout은 (분, 초) 형태
+            # 예: (5, 0) = 5분 0초 = 300초
+            # 예: (0, 300) = 0분 300초 = 300초  
             total_seconds = exec_timeout[0] * 60 + exec_timeout[1]
-            if total_seconds > 300:
+            
+            if total_seconds > 300:  # 5분(300초) 초과
                 vulnerabilities.append({
-                    'line': vty_line['line_number'],
-                    'matched_text': vty_line['line'],
+                    'line': line_config['line_number'],
+                    'matched_text': line_config['line'],
                     'details': {
                         'vulnerability': 'excessive_timeout',
+                        'line_type': line_type,
                         'timeout_value': f"{exec_timeout[0]} {exec_timeout[1]}",
                         'timeout_seconds': total_seconds,
-                        'recommendation': 'Set exec-timeout to 5 minutes or less'
+                        'recommendation': 'Set exec-timeout to 5 minutes or less (exec-timeout 5 0)'
                     }
                 })
 
