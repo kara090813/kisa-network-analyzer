@@ -7,7 +7,7 @@ KISA 네트워크 장비 보안 점검 룰의 논리적 검증 함수들 (완전
 """
 
 from typing import List, Dict, Any
-from .kisa_rules import ConfigContext
+from .loader import ConfigContext
 import re
 
 

@@ -13,7 +13,7 @@ from typing import List, Dict, Pattern, Callable, Optional, Any, Tuple
 from enum import Enum
 
 # 기존 KISA 룰셋의 구조 재사용
-from .kisa_rules import RuleCategory, ConfigContext, LogicalCondition, SecurityRule
+from .loader import RuleCategory, ConfigContext, LogicalCondition, SecurityRule
 
 # checks_nw.py에서 logical_check_function들 import
 from .checks_nw import (

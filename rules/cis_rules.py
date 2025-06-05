@@ -13,7 +13,7 @@ from typing import List, Dict, Pattern, Callable, Optional, Any, Tuple
 from enum import Enum
 
 # KISA 룰셋에서 공통 클래스들 import
-from .kisa_rules import (
+from .loader import (
     RuleCategory, ConfigContext, LogicalCondition, SecurityRule,
     parse_config_context
 )

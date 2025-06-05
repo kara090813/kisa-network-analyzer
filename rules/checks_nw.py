@@ -7,7 +7,15 @@ NW 네트워크 장비 보안 점검 룰의 논리적 검증 함수들 (완전�
 """
 import re
 from typing import List, Dict, Any
-from .kisa_rules import ConfigContext
+from .loader import (
+    ConfigContext,
+    _is_critical_interface,
+    _get_cisco_port_type,           
+    _analyze_network_environment,    
+    _is_private_ip,
+    _analyze_routing_protocols                   
+)
+
 
 
 def check_nw_01(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
@@ -1104,6 +1112,16 @@ def _analyze_network_environment(context: ConfigContext) -> Dict[str, Any]:
         'has_public_ip': has_public_ip
     }
 
+def _is_private_ip(ip_address: str) -> bool:
+    """사설 IP 대역 확인"""
+    if re.match(r'^10\.', ip_address):
+        return True
+    if re.match(r'^172\.(1[6-9]|2[0-9]|3[0-1])\.', ip_address):
+        return True
+    if re.match(r'^192\.168\.', ip_address):
+        return True
+    return False
+
 
 def _analyze_spoofing_protection_acls(context: ConfigContext) -> Dict[str, bool]:
     """스푸핑 방지 ACL 분석"""
@@ -2063,101 +2081,3 @@ def check_nw_42(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
 
 
 # Helper Functions
-
-def _is_private_ip(ip_address: str) -> bool:
-    """사설 IP 대역 확인"""
-    private_ranges = [
-        (r'^10\.', ),
-        (r'^172\.(1[6-9]|2[0-9]|3[0-1])\.', ),
-        (r'^192\.168\.', ),
-    ]
-    
-    for pattern in private_ranges:
-        if re.match(pattern[0], ip_address):
-            return True
-    return False
-
-
-def _analyze_routing_protocols(context: ConfigContext) -> Dict[str, List[Dict]]:
-
-    """라우팅 프로토콜 설정 분석"""
-    routing_protocols = {
-        'ospf': [],
-        'eigrp': [],
-        'bgp': [],
-        'rip': []
-    }
-    
-    lines = context.config_lines
-    current_protocol = None
-    current_config = None
-    
-    for i, line in enumerate(lines):
-        line_clean = line.strip()
-        
-        # 라우팅 프로토콜 시작
-        if line_clean.startswith('router '):
-            parts = line_clean.split()
-            if len(parts) >= 2:
-                protocol = parts[1].lower()
-                if protocol in routing_protocols:
-                    current_protocol = protocol
-                    current_config = {
-                        'line_number': i + 1,
-                        'config_start': line_clean,
-                        'has_authentication': False,
-                        'auth_type': None,
-                        'config_lines': [line_clean]
-                    }
-                    routing_protocols[protocol].append(current_config)
-        
-        # 프로토콜 설정 내부
-        elif current_protocol and current_config:
-            if line_clean and not line_clean.startswith('!'):
-                current_config['config_lines'].append(line_clean)
-                
-                # 인증 키워드 확인
-                auth_keywords = [
-                    'authentication message-digest',
-                    'authentication mode md5',
-                    'neighbor.*password',
-                    'area.*authentication',
-                    'key chain',
-                    'authentication key-chain'
-                ]
-                
-                for keyword in auth_keywords:
-                    if re.search(keyword, line_clean, re.IGNORECASE):
-                        current_config['has_authentication'] = True
-                        current_config['auth_type'] = keyword
-                        break
-        
-        # 새 섹션 시작
-        elif not line_clean.startswith(' ') and line_clean:
-            current_protocol = None
-            current_config = None
-    
-    return routing_protocols
-
-def _is_critical_interface(interface_name: str, device_type: str) -> bool:
-    """중요 인터페이스 여부 판별"""
-    interface_lower = interface_name.lower()
-    
-    # 항상 중요한 인터페이스들
-    critical_patterns = ['loopback', 'mgmt', 'management', 'console', 'tunnel', 'vlan1']
-    
-    if any(pattern in interface_lower for pattern in critical_patterns):
-        return True
-    
-    # 장비별 특정 중요 인터페이스
-    if device_type == "Cisco":
-        # 첫 번째 물리 포트들은 일반적으로 업링크
-        if (interface_lower.startswith('gi0/0') or interface_lower.startswith('fa0/0') or 
-            interface_lower.startswith('gigabitethernet0/0') or interface_lower.startswith('fastethernet0/0')):
-            return True
-        
-        # Serial 인터페이스는 WAN 연결용
-        if interface_lower.startswith('serial'):
-            return True
-    
-    return False

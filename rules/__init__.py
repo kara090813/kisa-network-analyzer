@@ -27,10 +27,10 @@ from .loader import (
 )
 
 # 기본 클래스들 import
-from .kisa_rules import (
+from .loader import (
     SecurityRule,
     RuleCategory,
-    ConfigContext,
+    ConfigContext, 
     LogicalCondition,
     parse_config_context,
     _is_critical_interface
