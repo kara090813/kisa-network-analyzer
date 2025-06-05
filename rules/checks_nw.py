@@ -295,6 +295,9 @@ def check_nw_06(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
     """NW-06: Session Timeout 설정 - 논리 기반 분석"""
     vulnerabilities = []
     
+    # 권장 타임아웃: 5분 (300초)
+    RECOMMENDED_TIMEOUT = 300
+    
     for vty_line in context.vty_lines:
         exec_timeout = vty_line.get('exec_timeout')
         
@@ -309,7 +312,7 @@ def check_nw_06(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
                 }
             })
         elif exec_timeout == 0:
-            # 무제한 타임아웃
+            # 무제한 타임아웃 (exec-timeout 0 0)
             vulnerabilities.append({
                 'line': vty_line['line_number'],
                 'matched_text': f"{vty_line['line']} (exec-timeout 0 0)",
@@ -319,15 +322,38 @@ def check_nw_06(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
                     'recommendation': '입력 대기 시간이 5분이 되도록 exec-timeout 5 0을 설정하세요.'
                 }
             })
-        elif exec_timeout > 300:  # 5분 초과
+        elif exec_timeout == RECOMMENDED_TIMEOUT:
+            # 권장 설정 (5분 = 300초) - 정상이므로 취약점 없음
+            # exec-timeout 5 0 또는 exec-timeout 0 300 모두 300초로 처리됨
+            continue
+        elif 0 < exec_timeout < RECOMMENDED_TIMEOUT:
+            # 권장값보다 짧은 타임아웃 (너무 빈번한 재접속 유발)
+            minutes = exec_timeout // 60
+            seconds = exec_timeout % 60
+            timeout_display = f"{minutes}분 {seconds}초" if seconds > 0 else f"{minutes}분"
             vulnerabilities.append({
                 'line': vty_line['line_number'],
-                'matched_text': f"{vty_line['line']} (timeout: {exec_timeout}s)",
+                'matched_text': f"{vty_line['line']} (timeout: {timeout_display})",
+                'details': {
+                    'vulnerability': 'too_short_timeout',
+                    'timeout_value': exec_timeout,
+                    'timeout_minutes': minutes,
+                    'recommendation': '너무 짧은 타임아웃으로 사용성이 저하됩니다. exec-timeout 5 0 (5분)을 권장합니다.'
+                }
+            })
+        elif exec_timeout > RECOMMENDED_TIMEOUT:
+            # 권장값보다 긴 타임아웃 (보안 위험)
+            minutes = exec_timeout // 60
+            seconds = exec_timeout % 60
+            timeout_display = f"{minutes}분 {seconds}초" if seconds > 0 else f"{minutes}분"
+            vulnerabilities.append({
+                'line': vty_line['line_number'],
+                'matched_text': f"{vty_line['line']} (timeout: {timeout_display})",
                 'details': {
                     'vulnerability': 'excessive_timeout',
                     'timeout_value': exec_timeout,
                     'timeout_minutes': exec_timeout // 60,
-                    'recommendation': 'Set exec-timeout to 5 minutes or less'
+                    'recommendation': '타임아웃이 너무 깁니다. 보안을 위해 exec-timeout 5 0 (5분)으로 설정하세요.'
                 }
             })
     
