@@ -363,11 +363,11 @@ def _parse_cisco_config_complete(context: ConfigContext):
         # SNMP 커뮤니티 파싱 개선
         elif line.startswith('snmp-server community'):
             parts = line.split()
-            if len(parts) >= 3:
+            if len(parts) >= 4:
                 community = parts[2]
                 # 권한 확인 (RO/RW)
                 permission = 'RO'  # 기본값
-                acl = None
+                acl = parts[4] if len(parts) >= 5 else None
                 
                 for j in range(3, len(parts)):
                     part = parts[j].upper()
@@ -501,6 +501,8 @@ def _is_critical_interface(interface_name: str, device_type: str) -> bool:
             return True
     
     return False
+
+
 
 
 # ==================== 추가 공통 유틸리티 함수들 ====================
