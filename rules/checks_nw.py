@@ -884,9 +884,9 @@ def check_nw_12(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
     buffer_line_num = 0
     
     for i, line in enumerate(context.config_lines):
-        match = re.match(r'^logging\s+buffered\s+(\d+)', line.strip())
+        match = re.match(r'^logging\s+(buffer|buffered)\s+(\d+)', line.strip())
         if match:
-            buffer_size = int(match.group(1))
+            buffer_size = int(match.group(2))
             buffer_line_num = i + 1
             break
     
@@ -1108,7 +1108,7 @@ def check_nw_19(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
     vulnerabilities = []
     
     for community_info in context.snmp_communities:
-        permission = community_info.get('permission', '').upper()
+        permission = community_info.get('permission', '').strip().upper()
         
         # RW(Read-Write) 권한 확인
         if permission in ['RW', 'READ-WRITE']:
