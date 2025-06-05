@@ -1305,7 +1305,7 @@ def check_nw_22(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
     ddos_protection_found = False
     
     for line in context.config_lines:
-        if any(pattern in line.lower() for pattern in ['tcp intercept', 'rate-limit', 'ip verify']):
+        if any(pattern in line.lower() for pattern in ['ip access-list']):
             ddos_protection_found = True
             break
     
