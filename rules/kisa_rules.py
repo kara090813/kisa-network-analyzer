@@ -8,11 +8,7 @@ logical_check_function은 checks_kisa.py에서 import
 """
 
 # 공통 클래스들을 loader에서 import
-from .loader import (
-    RuleCategory, 
-    SecurityRule
-)
-
+from .loader import RuleCategory, ConfigContext, LogicalCondition, SecurityRule, parse_config_context
 # ==================== KISA 룰셋 정의 ====================
 
 # checks_kisa.py에서 logical_check_function들 import
