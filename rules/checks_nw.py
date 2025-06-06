@@ -13,7 +13,11 @@ from .loader import (
     _get_cisco_port_type,           
     _analyze_network_environment,    
     _is_private_ip,
-    _analyze_routing_protocols                   
+    _analyze_routing_protocols,
+    _parse_line_configs,
+    _extract_ios_version_number,
+    _check_aux_port_security,
+    _check_console_port_security                  
 )
 
 
@@ -371,64 +375,7 @@ def check_nw_06(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
     return vulnerabilities
 
 
-def _parse_line_configs(config_lines: List[str]) -> Dict[str, Optional[Dict[str, Any]]]:
-    """라인 설정을 직접 파싱하는 헬퍼 함수"""
-    line_configs = {
-        'con 0': None,
-        'vty 0 4': None,
-        'vty 0 15': None,
-        'aux 0': None
-    }
-    
-    current_line_type = None
-    current_line_config = None
-    
-    for i, line in enumerate(config_lines):
-        line_clean = line.strip()
-        
-        # 라인 섹션 시작 감지
-        if line_clean.startswith('line '):
-            # 이전 라인 설정 저장
-            if current_line_type and current_line_config:
-                line_configs[current_line_type] = current_line_config
-            
-            # 새 라인 타입 파싱
-            parts = line_clean.split()
-            if len(parts) >= 2:
-                line_type_parts = parts[1:]
-                current_line_type = ' '.join(line_type_parts)
-                current_line_config = {
-                    'line_number': i + 1,
-                    'exec_timeout': None,
-                    'has_password': False,
-                    'has_login': False
-                }
-        
-        # 라인 설정 내부
-        elif current_line_type and line.startswith(' ') and not line_clean.startswith('!'):
-            if 'exec-timeout' in line_clean:
-                # exec-timeout 파싱
-                match = re.search(r'exec-timeout\s+(\d+)\s+(\d+)', line_clean)
-                if match:
-                    minutes = int(match.group(1))
-                    seconds = int(match.group(2))
-                    current_line_config['exec_timeout'] = (minutes, seconds)
-            elif 'password' in line_clean:
-                current_line_config['has_password'] = True
-            elif line_clean in ['login', 'login local']:
-                current_line_config['has_login'] = True
-        
-        # 다른 섹션 시작 (라인 설정 종료)
-        elif current_line_type and not line.startswith(' ') and line_clean and not line_clean.startswith('!'):
-            line_configs[current_line_type] = current_line_config
-            current_line_type = None
-            current_line_config = None
-    
-    # 마지막 라인 설정 저장
-    if current_line_type and current_line_config:
-        line_configs[current_line_type] = current_line_config
-    
-    return line_configs
+
 
 
 
@@ -472,18 +419,18 @@ def check_nw_08(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
     vulnerabilities = []
     
     # AUX 포트 보안 설정 확인
-    aux_issues = _check_aux_port_security_nw08(context)
+    aux_issues = _check_aux_port_security(context)
     vulnerabilities.extend(aux_issues)
     
     # Console 포트 보안 설정 확인
-    console_issues = _check_console_port_security_nw08(context)
+    console_issues = _check_console_port_security(context)
     vulnerabilities.extend(console_issues)
     
     return vulnerabilities
 
 
-def _check_aux_port_security_nw08(context: ConfigContext) -> List[Dict[str, Any]]:
-    """AUX 포트 보안 설정 확인 (NW-08 전용)"""
+def _check_aux_port_security(context: ConfigContext) -> List[Dict[str, Any]]:
+    """AUX 포트 보안 설정 확인"""
     issues = []
     
     # AUX 라인 설정 찾기
@@ -558,8 +505,8 @@ def _check_aux_port_security_nw08(context: ConfigContext) -> List[Dict[str, Any]
     return issues
 
 
-def _check_console_port_security_nw08(context: ConfigContext) -> List[Dict[str, Any]]:
-    """Console 포트 보안 설정 확인 (NW-08 전용)"""
+def _check_console_port_security(context: ConfigContext) -> List[Dict[str, Any]]:
+    """Console 포트 보안 설정 확인"""
     issues = []
     
     # Console 라인 설정 찾기
@@ -648,99 +595,6 @@ def _check_console_port_security_nw08(context: ConfigContext) -> List[Dict[str, 
             })
     
     return issues
-
-
-def _check_console_port_security_nw08(context: ConfigContext) -> List[Dict[str, Any]]:
-    """Console 포트 보안 설정 확인 (NW-08 전용)"""
-    issues = []
-    
-    # Console 라인 설정 찾기
-    config_lines = context.config_lines
-    console_line_found = False
-    console_line_number = 0
-    console_config = {
-        'has_password': False,
-        'has_login': False,
-        'exec_timeout': None,
-        'has_logging_sync': False
-    }
-    
-    in_console_section = False
-    
-    for i, line in enumerate(config_lines):
-        line_clean = line.strip()
-        original_line = line
-        
-        # Console 라인 시작 (line con 0 또는 line console 0)
-        if line_clean.startswith('line con') or line_clean.startswith('line console'):
-            console_line_found = True
-            console_line_number = i + 1
-            in_console_section = True
-            continue
-            
-        # Console 섹션 내부 설정
-        elif in_console_section and original_line.startswith(' '):
-            if 'password' in line_clean:
-                console_config['has_password'] = True
-            elif line_clean in ['login', 'login local']:
-                console_config['has_login'] = True
-            elif 'exec-timeout' in line_clean:
-                # exec-timeout 값 파싱
-                parts = line_clean.split()
-                if len(parts) >= 2:
-                    try:
-                        minutes = int(parts[1])
-                        seconds = int(parts[2]) if len(parts) > 2 else 0
-                        console_config['exec_timeout'] = minutes * 60 + seconds
-                    except:
-                        pass
-            elif 'logging synchronous' in line_clean:
-                console_config['has_logging_sync'] = True
-                
-        # 다른 섹션 시작하면 Console 섹션 종료
-        elif in_console_section and not original_line.startswith(' ') and line_clean:
-            in_console_section = False
-    
-    if console_line_found:
-        # Console 포트 보안 권고사항 확인
-        recommendations = []
-        
-        # 패스워드가 없는 경우
-        if not console_config['has_password']:
-            recommendations.append('set_console_password')
-            
-        # 로그인 설정이 없는 경우
-        if not console_config['has_login']:
-            recommendations.append('configure_login')
-            
-        # 무제한 타임아웃인 경우
-        if console_config['exec_timeout'] == 0:
-            recommendations.append('set_exec_timeout')
-            
-        # 로깅 동기화가 없는 경우 (보안과 직접 관련은 없지만 권고)
-        if not console_config['has_logging_sync']:
-            recommendations.append('enable_logging_sync')
-        
-        # 심각한 보안 문제만 보고 (패스워드나 로그인이 없는 경우)
-        critical_issues = [r for r in recommendations if r in ['set_console_password', 'configure_login']]
-        
-        if critical_issues:
-            issues.append({
-                'line': console_line_number,
-                'matched_text': 'line con 0 (security recommendations)',
-                'details': {
-                    'port_type': 'console',
-                    'vulnerability': 'console_port_security_recommendations',
-                    'critical_issues': critical_issues,
-                    'all_recommendations': recommendations,
-                    'current_config': console_config,
-                    'recommendation': 'Secure console port with password and login configuration',
-                    'severity_adjusted': 'Medium' if 'set_console_password' in critical_issues else 'Low'
-                }
-            })
-    
-    return issues
-
 
 def check_nw_09(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """NW-09: 로그온 시 경고 메시지 설정 - 🔥 정확한 라인 번호 제공"""
@@ -909,7 +763,7 @@ def check_nw_12(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
                     'severity_adjusted': 'Medium'
                 }
             })
-        elif buffer_size < 16384:  # 16KB 미만
+        elif buffer_size < 16000:  # 16KB 미만
             # 버퍼 크기가 너무 작음
             vulnerabilities.append({
                 'line': buffer_line_num,
@@ -917,7 +771,7 @@ def check_nw_12(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
                 'details': {
                     'vulnerability': 'insufficient_logging_buffer_size',
                     'current_size': buffer_size,
-                    'recommended_minimum': 16384,
+                    'recommended_minimum': 16000,
                     'recommendation': 'Increase logging buffer size to at least 16KB',
                     'severity_adjusted': 'Medium'
                 }
@@ -1047,35 +901,100 @@ def check_nw_17(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
     
     for community_info in context.snmp_communities:
         issues = []
+        severity = '하'  # 기본 심각도
         
-        # 기본 커뮤니티 스트링 확인
+        # 1. 기본 커뮤니티 스트링 확인 (가장 위험)
         if community_info['is_default']:
             issues.append('default_community')
+            severity = '상'  # 기본 커뮤니티는 매우 위험
         
-        # 길이 확인 (8자 미만)
-        if community_info['length'] < 8:
-            issues.append('too_short')
+        # 2. 매우 짧은 길이 확인 (4자 미만은 매우 위험)
+        elif community_info['length'] < 4:
+            issues.append('very_short')
+            severity = '중'
         
-        # 단순한 패턴 확인
-        simple_patterns = ['123', '456', '111', '000', 'admin', 'test', 'temp', 'snmp', 'cisco', 'router']
-        if any(pattern in community_info['community'].lower() for pattern in simple_patterns):
-            issues.append('simple_pattern')
+        # 3. 짧은 길이 확인 (6자 미만, ACL 여부에 따라 다르게 처리)
+        elif community_info['length'] < 6:
+            if not community_info.get('acl'):  # ACL이 없으면 더 위험
+                issues.append('short_without_acl')
+                severity = '중'
+            else:
+                issues.append('short_with_acl')
+                severity = '하'
         
-        # 복잡성 부족 (숫자만 또는 문자만)
-        community = community_info['community']
-        if len(community) > 3 and (community.isdigit() or community.isalpha()):
-            issues.append('lacks_complexity')
+        # 4. 매우 단순한 패턴 확인 (정말 위험한 것들만)
+        community = community_info['community'].lower()
+        very_simple_patterns = [
+            'public', 'private',  # 기본값들
+            '123', '1234', '12345',  # 연속 숫자
+            'admin', 'test', 'temp',  # 일반적인 단어
+            'cisco', 'router', 'switch',  # 장비 관련 단어
+            'snmp', 'community'  # 프로토콜 관련 단어
+        ]
         
+        if any(pattern == community or pattern in community for pattern in very_simple_patterns):
+            issues.append('predictable_pattern')
+            # ACL이 있어도 예측 가능한 패턴은 위험
+            severity = '중' if community_info.get('acl') else '상'
+        
+        # 5. 극도로 단순한 복잡성 (3자 이하이고 숫자만 또는 같은 문자 반복)
+        elif len(community) <= 3 and (community.isdigit() or len(set(community)) == 1):
+            issues.append('extremely_simple')
+            severity = '중'
+        
+        # 6. 단순한 복잡성 (6자 이상이지만 숫자만 또는 문자만, ACL 고려)
+        elif len(community) >= 6 and (community.isdigit() or community.isalpha()):
+            if not community_info.get('acl'):
+                issues.append('lacks_complexity_no_acl')
+                severity = '하'
+            # ACL이 있고 6자 이상이면 복잡성 부족은 경미한 문제로 처리
+            # issues에 추가하지 않음 (정상으로 간주)
+        
+        # 7. ACL 없는 경우 추가 위험도
+        if not community_info.get('acl') and not issues:
+            # 다른 문제가 없어도 ACL이 없으면 권고사항 제시
+            issues.append('no_access_control')
+            severity = '하'
+        
+        # 취약점이 발견된 경우만 보고
         if issues:
+            # 권고사항 생성
+            recommendations = []
+            
+            if 'default_community' in issues:
+                recommendations.append("기본 커뮤니티 스트링(public, private)을 사용하지 마세요")
+            if any(issue in issues for issue in ['very_short', 'short_without_acl', 'short_with_acl']):
+                recommendations.append("커뮤니티 스트링은 최소 6자 이상으로 설정하세요")
+            if 'predictable_pattern' in issues or 'extremely_simple' in issues:
+                recommendations.append("예측하기 어려운 복잡한 문자열을 사용하세요")
+            if 'lacks_complexity_no_acl' in issues:
+                recommendations.append("숫자와 문자를 조합하거나 ACL을 적용하세요")
+            if 'no_access_control' in issues:
+                recommendations.append("SNMP 접근 제어를 위해 ACL을 적용하는 것을 권장합니다")
+            
+            # 심각도별 메시지 조정
+            if severity == '상':
+                main_message = f"SNMP 커뮤니티 '{community_info['community']}'에 심각한 보안 문제가 있습니다"
+            elif severity == '중':
+                main_message = f"SNMP 커뮤니티 '{community_info['community']}'의 보안을 강화해야 합니다"
+            else:
+                main_message = f"SNMP 커뮤니티 '{community_info['community']}'의 보안 권고사항이 있습니다"
+            
             vulnerabilities.append({
                 'line': community_info['line_number'],
-                'matched_text': f"snmp-server community {community_info['community']}",
+                'matched_text': f"snmp-server community {community_info['community']} {community_info.get('permission', '')}",
                 'details': {
                     'community': community_info['community'],
                     'issues': issues,
                     'community_length': community_info['length'],
                     'is_default': community_info['is_default'],
-                    'recommendation': 'SNMP 커뮤니티 문자열은 기본값을 사용하지 말고, 최소 8자 이상의 복잡한 문자열로 설정하여 보안을 강화해야 합니다.'
+                    'has_acl': bool(community_info.get('acl')),
+                    'acl_name': community_info.get('acl'),
+                    'permission': community_info.get('permission', 'RO'),
+                    'severity_adjusted': severity,
+                    'vulnerability': 'weak_snmp_community',
+                    'main_message': main_message,
+                    'recommendation': '. '.join(recommendations)
                 }
             })
     
@@ -1690,12 +1609,7 @@ def check_nw_30(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
     return vulnerabilities
 
 
-def _extract_ios_version_number(version_string: str) -> float:
-    """IOS 버전 번호 추출"""
-    match = re.search(r'(\d+)\.(\d+)', version_string)
-    if match:
-        return float(f"{match.group(1)}.{match.group(2)}")
-    return 15.0  # 기본값
+
 
 
 def check_nw_31(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:

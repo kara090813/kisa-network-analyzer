@@ -117,6 +117,72 @@ class SecurityRule:
 
 # ==================== 공통 파싱 함수들 (중앙화) ====================
 
+def _extract_ios_version_number(version_string: str) -> float:
+    """IOS 버전 번호 추출"""
+    match = re.search(r'(\d+)\.(\d+)', version_string)
+    if match:
+        return float(f"{match.group(1)}.{match.group(2)}")
+    return 15.0  # 기본값
+
+def _parse_line_configs(config_lines: List[str]) -> Dict[str, Optional[Dict[str, Any]]]:
+    """라인 설정을 직접 파싱하는 헬퍼 함수"""
+    line_configs = {
+        'con 0': None,
+        'vty 0 4': None,
+        'vty 0 15': None,
+        'aux 0': None
+    }
+    
+    current_line_type = None
+    current_line_config = None
+    
+    for i, line in enumerate(config_lines):
+        line_clean = line.strip()
+        
+        # 라인 섹션 시작 감지
+        if line_clean.startswith('line '):
+            # 이전 라인 설정 저장
+            if current_line_type and current_line_config:
+                line_configs[current_line_type] = current_line_config
+            
+            # 새 라인 타입 파싱
+            parts = line_clean.split()
+            if len(parts) >= 2:
+                line_type_parts = parts[1:]
+                current_line_type = ' '.join(line_type_parts)
+                current_line_config = {
+                    'line_number': i + 1,
+                    'exec_timeout': None,
+                    'has_password': False,
+                    'has_login': False
+                }
+        
+        # 라인 설정 내부
+        elif current_line_type and line.startswith(' ') and not line_clean.startswith('!'):
+            if 'exec-timeout' in line_clean:
+                # exec-timeout 파싱
+                match = re.search(r'exec-timeout\s+(\d+)\s+(\d+)', line_clean)
+                if match:
+                    minutes = int(match.group(1))
+                    seconds = int(match.group(2))
+                    current_line_config['exec_timeout'] = (minutes, seconds)
+            elif 'password' in line_clean:
+                current_line_config['has_password'] = True
+            elif line_clean in ['login', 'login local']:
+                current_line_config['has_login'] = True
+        
+        # 다른 섹션 시작 (라인 설정 종료)
+        elif current_line_type and not line.startswith(' ') and line_clean and not line_clean.startswith('!'):
+            line_configs[current_line_type] = current_line_config
+            current_line_type = None
+            current_line_config = None
+    
+    # 마지막 라인 설정 저장
+    if current_line_type and current_line_config:
+        line_configs[current_line_type] = current_line_config
+    
+    return line_configs
+
 def parse_config_context(config_text: str, device_type: str) -> ConfigContext:
     """설정 파일을 분석하여 완전한 컨텍스트 객체 생성"""
     context = ConfigContext(
@@ -367,15 +433,19 @@ def _parse_cisco_config_complete(context: ConfigContext):
                 community = parts[2]
                 # 권한 확인 (RO/RW)
                 permission = 'RO'  # 기본값
-                acl = parts[4] if len(parts) >= 5 else None
+                acl = None
                 
-                for j in range(3, len(parts)):
-                    part = parts[j].upper()
-                    if part in ['RO', 'RW', 'READ-ONLY', 'READ-WRITE']:
-                        permission = part
-                    elif part.isdigit() or (part.isalnum() and len(part) > 2):
-                        # ACL 번호나 이름
-                        acl = parts[j]
+                for part in parts[3:]:
+                    upper_part = part.upper()
+                    # 권한 판별 및 정규화
+                    if upper_part in ['RO', 'READ-ONLY']:
+                        permission = 'RO'
+                    elif upper_part in ['RW', 'READ-WRITE']:
+                        permission = 'RW'
+                    else:
+                        # ACL 가능성 여부 확인 (숫자, 알파벳+숫자+특수문자)
+                        if re.match(r'^[\w\-]+$', part):
+                            acl = part
                 
                 community_info = {
                     'community': community,

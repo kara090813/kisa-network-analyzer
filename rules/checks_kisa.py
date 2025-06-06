@@ -6,10 +6,16 @@ KISA 네트워크 장비 보안 점검 룰의 논리적 검증 함수들 (완전
 각 KISA 룰에 대한 logical_check_function들을 정의
 """
 
-from typing import List, Dict, Any
-from .loader import ConfigContext
+from typing import List, Dict, Any, Optional
 import re
-
+from .loader import (
+    RuleCategory, 
+    ConfigContext, 
+    LogicalCondition, 
+    SecurityRule, 
+    _parse_line_configs
+)
+from .cisco_defaults import CiscoDefaults
 
 def check_basic_password_usage(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """N-01: 기본 패스워드 사용 - 개선된 버전"""
@@ -89,30 +95,65 @@ def check_password_complexity(line: str, line_num: int, context: ConfigContext) 
     """N-02: 패스워드 복잡성 설정 - 논리 기반 분석"""
     vulnerabilities = []
     
-    # 패스워드 최소 길이 설정 확인
-    has_min_length = 'passwords min-length' in context.full_config
+    # secret 타입 사용자 확인
+    has_secret_users = any(
+        user.get('password_type') == 'secret' 
+        for user in context.parsed_users
+    )
     
-    if not has_min_length:
+    # enable secret 사용 확인
+    has_enable_secret = context.global_settings.get('enable_password_type') == 'secret'
+    
+    # 패스워드 암호화 서비스 확인
+    password_encryption_enabled = context.parsed_services.get('password-encryption', False)
+    
+    # 패스워드 최소 길이 설정 확인
+    has_min_length = any([
+        'passwords min-length' in context.full_config,
+        'password-policy' in context.full_config,
+        'security passwords min-length' in context.full_config
+    ])
+    
+    # 복잡성 정책이 필요한지 판단
+    needs_complexity_policy = False
+    weak_passwords = []
+    
+    for user in context.parsed_users:
+        # secret 타입은 제외 (이미 복잡성 보장)
+        if user.get('password_type') == 'secret':
+            continue
+            
+        if user['has_password'] and not user['password_encrypted']:
+            needs_complexity_policy = True
+            weak_passwords.append(user)
+    
+    # 정책이 없고 약한 패스워드가 있는 경우만 보고
+    if needs_complexity_policy and not has_min_length and not password_encryption_enabled:
         vulnerabilities.append({
             'line': 0,
-            'matched_text': '패스워드 최소 길이 설정 누락',
+            'matched_text': '패스워드 복잡성 정책 설정 필요',
             'details': {
-                'vulnerability': 'no_password_min_length_policy',
-                'recommendation': 'security passwords min-length 8'
+                'vulnerability': 'no_password_complexity_policy',
+                'has_secret_users': has_secret_users,
+                'has_enable_secret': has_enable_secret,
+                'weak_password_count': len(weak_passwords),
+                'recommendation': 'Configure password complexity policy or use secret passwords',
+                'severity_adjusted': 'Medium' if has_secret_users else 'High'
             }
         })
     
-    # 약한 패스워드 패턴 검사
-    for user in context.parsed_users:
-        if user['has_password'] and not user['password_encrypted']:
-            vulnerabilities.append({
-                'line': user['line_number'],
-                'matched_text': f"username {user['username']} password (weak)",
-                'details': {
-                    'vulnerability': 'unencrypted_password',
-                    'username': user['username']
-                }
-            })
+    # 개별 약한 패스워드 검사
+    for user in weak_passwords:
+        vulnerabilities.append({
+            'line': user['line_number'],
+            'matched_text': f"username {user['username']} password (weak complexity)",
+            'details': {
+                'vulnerability': 'weak_password_complexity',
+                'username': user['username'],
+                'recommendation': 'Use username secret or enable service password-encryption',
+                'severity_adjusted': 'Medium'
+            }
+        })
     
     return vulnerabilities
 
@@ -206,7 +247,6 @@ def check_vty_access_control(line: str, line_num: int, context: ConfigContext) -
     vulnerabilities = []
     
     if not context.vty_lines:
-        # VTY 설정이 아예 없는 경우
         vulnerabilities.append({
             'line': 0,
             'matched_text': 'No VTY configuration found',
@@ -221,15 +261,13 @@ def check_vty_access_control(line: str, line_num: int, context: ConfigContext) -
         issues = []
         
         # Access-class 확인
-        if not vty_line['has_access_class']:
-            issues.append('no_access_class')
+        if not vty_line['has_access-class']:
+            issues.append('no_access-class')
         
         # Transport input 확인  
         transport_input = vty_line.get('transport_input', [])
         if 'all' in transport_input:
             issues.append('transport_all_allowed')
-        elif 'telnet' in transport_input:
-            issues.append('telnet_allowed')
         
         # 패스워드 확인
         if not vty_line['has_password'] and vty_line.get('login_method') != 'login local':
@@ -242,9 +280,9 @@ def check_vty_access_control(line: str, line_num: int, context: ConfigContext) -
                 'details': {
                     'issues': issues,
                     'vty_config': vty_line,
-                    'has_access_class': vty_line['has_access_class'],
+                    'has_access-class': vty_line['has_access-class'],
                     'transport_input': transport_input,
-                    'access_class': vty_line.get('access_class'),
+                    'access-class': vty_line.get('access-class'),
                     'recommendation': 'VTY 라인에 access-class를 설정하여 접속 가능한 IP를 제한하세요.'
                 }
             }
@@ -258,41 +296,57 @@ def check_session_timeout(line: str, line_num: int, context: ConfigContext) -> L
     """N-05: Session Timeout 설정 - 논리 기반 분석"""
     vulnerabilities = []
     
-    for vty_line in context.vty_lines:
-        exec_timeout = vty_line.get('exec_timeout')
+    # 컨피그에서 직접 라인 설정 파싱 (context의 라인 정보가 불완전할 수 있음)
+    line_configs = _parse_line_configs(context.config_lines)
+    
+    for line_type, line_config in line_configs.items():
+        if line_config is None:
+            continue
+            
+        exec_timeout = line_config.get('exec_timeout')
+        line_number = line_config.get('line_number', 0)
         
         if exec_timeout is None:
-            # 타임아웃 설정이 없음
+            # exec-timeout이 설정되지 않음 (기본값 10분)
             vulnerabilities.append({
-                'line': vty_line['line_number'],
-                'matched_text': vty_line['line'],
+                'line': line_number,
+                'matched_text': f"line {line_type} (no exec-timeout configured)",
                 'details': {
                     'vulnerability': 'no_exec_timeout',
-                    'recommendation': '입력 대기 시간이 5분이 되도록 exec-timeout 5 0을 설정하세요.'
+                    'line_type': line_type.upper(),
+                    'default_timeout': '10 minutes',
+                    'recommendation': 'Set exec-timeout to 5 minutes or less (exec-timeout 5 0)'
                 }
             })
-        elif exec_timeout == 0:
+        elif exec_timeout == (0, 0):
             # 무제한 타임아웃
             vulnerabilities.append({
-                'line': vty_line['line_number'],
-                'matched_text': f"{vty_line['line']} (exec-timeout 0 0)",
+                'line': line_number,
+                'matched_text': f"line {line_type} (exec-timeout 0 0)",
                 'details': {
                     'vulnerability': 'infinite_timeout',
-                    'timeout_value': exec_timeout,
-                    'recommendation': '입력 대기 시간이 5분이 되도록 exec-timeout 5 0을 설정하세요.'
+                    'line_type': line_type.upper(),
+                    'timeout_value': '0 0 (infinite)',
+                    'recommendation': 'Set exec-timeout to 5 minutes (exec-timeout 5 0)'
                 }
             })
-        elif exec_timeout > 300:  # 5분 초과
-            vulnerabilities.append({
-                'line': vty_line['line_number'],
-                'matched_text': f"{vty_line['line']} (timeout: {exec_timeout}s)",
-                'details': {
-                    'vulnerability': 'excessive_timeout',
-                    'timeout_value': exec_timeout,
-                    'timeout_minutes': exec_timeout // 60,
-                    'recommendation': 'Set exec-timeout to 5 minutes or less'
-                }
-            })
+        else:
+            # 타임아웃 값 계산
+            total_seconds = exec_timeout[0] * 60 + exec_timeout[1]
+            
+            if total_seconds > 300:  # 5분(300초) 초과
+                vulnerabilities.append({
+                    'line': line_number,
+                    'matched_text': f"line {line_type} (exec-timeout {exec_timeout[0]} {exec_timeout[1]})",
+                    'details': {
+                        'vulnerability': 'excessive_timeout',
+                        'line_type': line_type.upper(),
+                        'timeout_value': f"{exec_timeout[0]} {exec_timeout[1]}",
+                        'timeout_seconds': total_seconds,
+                        'timeout_minutes': total_seconds / 60,
+                        'recommendation': 'Set exec-timeout to 5 minutes or less (exec-timeout 5 0)'
+                    }
+                })
     
     return vulnerabilities
 
@@ -349,42 +403,104 @@ def check_snmp_security(line: str, line_num: int, context: ConfigContext) -> Lis
     vulnerabilities = []
     
     if not context.snmp_communities:
-        # SNMP가 설정되지 않은 경우는 취약점이 아님
         return vulnerabilities
     
     for community_info in context.snmp_communities:
         issues = []
+        severity = '하'  # 기본 심각도
         
-        # 기본 커뮤니티 스트링 확인
+        # 1. 기본 커뮤니티 스트링 확인 (가장 위험)
         if community_info['is_default']:
             issues.append('default_community')
+            severity = '상'  # 기본 커뮤니티는 매우 위험
         
-        # 길이 확인
-        if community_info['length'] < 8:
-            issues.append('too_short')
+        # 2. 매우 짧은 길이 확인 (4자 미만은 매우 위험)
+        elif community_info['length'] < 4:
+            issues.append('very_short')
+            severity = '중'
         
-        # 단순한 패턴 확인
-        simple_patterns = ['123', '456', '111', '000', 'admin', 'test', 'temp', 'cisco', 'router', 'switch']
-        if any(pattern in community_info['community'].lower() for pattern in simple_patterns):
-            issues.append('simple_pattern')
+        # 3. 짧은 길이 확인 (6자 미만, ACL 여부에 따라 다르게 처리)
+        elif community_info['length'] < 6:
+            if not community_info.get('acl'):  # ACL이 없으면 더 위험
+                issues.append('short_without_acl')
+                severity = '중'
+            else:
+                issues.append('short_with_acl')
+                severity = '하'
         
-        # 숫자만 또는 문자만으로 구성된 경우
-        community = community_info['community']
-        if len(community) > 3 and (community.isdigit() or community.isalpha()):
-            issues.append('lacks_complexity')
+        # 4. 매우 단순한 패턴 확인 (정말 위험한 것들만)
+        community = community_info['community'].lower()
+        very_simple_patterns = [
+            'public', 'private',  # 기본값들
+            '123', '1234', '12345',  # 연속 숫자
+            'admin', 'test', 'temp',  # 일반적인 단어
+            'cisco', 'router', 'switch',  # 장비 관련 단어
+            'snmp', 'community'  # 프로토콜 관련 단어
+        ]
         
+        if any(pattern == community or pattern in community for pattern in very_simple_patterns):
+            issues.append('predictable_pattern')
+            # ACL이 있어도 예측 가능한 패턴은 위험
+            severity = '중' if community_info.get('acl') else '상'
+        
+        # 5. 극도로 단순한 복잡성 (3자 이하이고 숫자만 또는 같은 문자 반복)
+        elif len(community) <= 3 and (community.isdigit() or len(set(community)) == 1):
+            issues.append('extremely_simple')
+            severity = '중'
+        
+        # 6. 단순한 복잡성 (6자 이상이지만 숫자만 또는 문자만, ACL 고려)
+        elif len(community) >= 6 and (community.isdigit() or community.isalpha()):
+            if not community_info.get('acl'):
+                issues.append('lacks_complexity_no_acl')
+                severity = '하'
+            # ACL이 있고 6자 이상이면 복잡성 부족은 경미한 문제로 처리
+            # issues에 추가하지 않음 (정상으로 간주)
+        
+        # 7. ACL 없는 경우 추가 위험도
+        if not community_info.get('acl') and not issues:
+            # 다른 문제가 없어도 ACL이 없으면 권고사항 제시
+            issues.append('no_access_control')
+            severity = '하'
+        
+        # 취약점이 발견된 경우만 보고
         if issues:
+            # 권고사항 생성
+            recommendations = []
+            
+            if 'default_community' in issues:
+                recommendations.append("기본 커뮤니티 스트링(public, private)을 사용하지 마세요")
+            if any(issue in issues for issue in ['very_short', 'short_without_acl', 'short_with_acl']):
+                recommendations.append("커뮤니티 스트링은 최소 6자 이상으로 설정하세요")
+            if 'predictable_pattern' in issues or 'extremely_simple' in issues:
+                recommendations.append("예측하기 어려운 복잡한 문자열을 사용하세요")
+            if 'lacks_complexity_no_acl' in issues:
+                recommendations.append("숫자와 문자를 조합하거나 ACL을 적용하세요")
+            if 'no_access_control' in issues:
+                recommendations.append("SNMP 접근 제어를 위해 ACL을 적용하는 것을 권장합니다")
+            
+            # 심각도별 메시지 조정
+            if severity == '상':
+                main_message = f"SNMP 커뮤니티 '{community_info['community']}'에 심각한 보안 문제가 있습니다"
+            elif severity == '중':
+                main_message = f"SNMP 커뮤니티 '{community_info['community']}'의 보안을 강화해야 합니다"
+            else:
+                main_message = f"SNMP 커뮤니티 '{community_info['community']}'의 보안 권고사항이 있습니다"
+            
             vulnerabilities.append({
                 'line': community_info['line_number'],
-                'matched_text': f"snmp-server community {community_info['community']}",
+                'matched_text': f"snmp-server community {community_info['community']} {community_info.get('permission', '')}",
                 'details': {
                     'community': community_info['community'],
                     'issues': issues,
-                    'permission': community_info['permission'],
-                    'has_acl': bool(community_info['acl']),
                     'community_length': community_info['length'],
                     'is_default': community_info['is_default'],
-                    'recommendation': 'Use complex community string (min 8 chars, avoid default values like public/private)'
+                    'has_acl': bool(community_info.get('acl')),
+                    'acl_name': community_info.get('acl'),
+                    'permission': community_info.get('permission', 'RO'),
+                    'severity_adjusted': severity,
+                    'vulnerability': 'weak_snmp_community',
+                    'main_message': main_message,
+                    'recommendation': '. '.join(recommendations)
                 }
             })
     
@@ -455,29 +571,151 @@ def check_anti_spoofing_filtering(line: str, line_num: int, context: ConfigConte
     """N-12: Spoofing 방지 필터링 적용 - 논리 기반 분석"""
     vulnerabilities = []
     
-    # 스푸핑 방지를 위한 ACL 패턴 확인
-    spoofing_protection_found = False
+    # 네트워크 환경 분석
+    network_analysis = _analyze_network_environment(context)
     
-    for acl_number, acl_lines in context.access_lists.items():
-        for acl_line in acl_lines:
-            # 사설망 대역 차단 ACL 확인
-            if any(pattern in acl_line.lower() for pattern in ['10.0.0.0', '192.168.', '127.0.0.0']):
-                spoofing_protection_found = True
-                break
-        if spoofing_protection_found:
-            break
-    
-    if not spoofing_protection_found:
+    # 외부 연결이 없는 내부 전용 네트워크는 낮은 우선순위
+    if not network_analysis['has_external_connection']:
+        # 내부 전용 네트워크에서는 정보성 메시지만
         vulnerabilities.append({
             'line': 0,
-            'matched_text': 'Anti-spoofing filtering not configured',
+            'matched_text': 'Internal network - Spoofing protection optional',
             'details': {
-                'vulnerability': 'no_anti_spoofing_filter',
-                'recommendation': 'Configure anti-spoofing ACL to block private network ranges'
+                'vulnerability': 'spoofing_protection_info',
+                'network_type': 'internal_only',
+                'recommendation': 'Consider spoofing protection for security best practices',
+                'severity_adjusted': 'Info',
+                'external_interfaces': network_analysis['external_interfaces']
+            }
+        })
+        return vulnerabilities
+    
+    # ACL 내용 분석 (기존 로직 유지하되 개선)
+    acl_protections = _analyze_spoofing_protection_acls(context)
+    protection_count = sum(acl_protections.values())
+    
+    # 외부 인터페이스가 있는데 보호가 부족한 경우만 보고
+    if protection_count < 3:  # 기본적인 보호 수준
+        missing = [k for k, v in acl_protections.items() if not v]
+        
+        severity = 'High' if protection_count == 0 else 'Medium'
+        
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': 'Spoofing protection insufficient for external-facing network',
+            'details': {
+                'vulnerability': 'insufficient_spoofing_protection',
+                'network_type': 'external_facing',
+                'protection_level': protection_count,
+                'missing_protections': missing,
+                'external_interfaces': network_analysis['external_interfaces'],
+                'recommendation': 'Implement spoofing protection ACLs for: ' + ', '.join(missing),
+                'severity_adjusted': severity
             }
         })
     
     return vulnerabilities
+
+
+def _analyze_network_environment(context: ConfigContext) -> Dict[str, Any]:
+    """네트워크 환경 분석"""
+    external_interfaces = []
+    has_nat = False
+    has_public_ip = False
+    
+    for interface_name, interface_config in context.parsed_interfaces.items():
+        # NAT outside 인터페이스 확인
+        config_lines = interface_config.get('config_lines', [])
+        if any('nat outside' in line for line in config_lines):
+            external_interfaces.append(interface_name)
+            has_nat = True
+        
+        # 공인 IP 확인
+        ip_address = interface_config.get('ip_address', '')
+        if ip_address and not _is_private_ip(ip_address):
+            external_interfaces.append(interface_name)
+            has_public_ip = True
+        
+        # 설명 기반 외부 인터페이스 판단
+        description = interface_config.get('description', '').lower()
+        external_keywords = ['isp', 'internet', 'wan', 'external', 'outside', 'uplink']
+        if any(keyword in description for keyword in external_keywords):
+            external_interfaces.append(interface_name)
+    
+    return {
+        'has_external_connection': len(external_interfaces) > 0,
+        'external_interfaces': list(set(external_interfaces)),
+        'has_nat': has_nat,
+        'has_public_ip': has_public_ip
+    }
+
+def _is_private_ip(ip_address: str) -> bool:
+    """사설 IP 대역 확인"""
+    if re.match(r'^10\.', ip_address):
+        return True
+    if re.match(r'^172\.(1[6-9]|2[0-9]|3[0-1])\.', ip_address):
+        return True
+    if re.match(r'^192\.168\.', ip_address):
+        return True
+    return False
+
+
+def _analyze_spoofing_protection_acls(context: ConfigContext) -> Dict[str, bool]:
+    """스푸핑 방지 ACL 분석"""
+    acl_protections = {
+        'private_ranges': False,
+        'loopback': False,
+        'broadcast': False,
+        'multicast': False,
+        'bogons': False
+    }
+    
+    config_text = context.full_config.lower()
+    
+    # Private IP 차단 확인
+    private_patterns = [
+        r'deny.*ip.*10\.0\.0\.0.*0\.255\.255\.255',
+        r'deny.*ip.*172\.1[6-9]\.0\.0',
+        r'deny.*ip.*172\.2[0-9]\.0\.0',
+        r'deny.*ip.*172\.3[0-1]\.0\.0',
+        r'deny.*ip.*192\.168\.0\.0.*0\.0\.255\.255'
+    ]
+    
+    if any(re.search(pattern, config_text) for pattern in private_patterns):
+        acl_protections['private_ranges'] = True
+    
+    # 루프백 차단 확인
+    if re.search(r'deny.*ip.*127\.0\.0\.0', config_text):
+        acl_protections['loopback'] = True
+    
+    # 멀티캐스트 차단 확인  
+    if re.search(r'deny.*ip.*22[4-9]\.|deny.*ip.*23[0-9]\.', config_text):
+        acl_protections['multicast'] = True
+    
+    # 브로드캐스트 차단 확인
+    if re.search(r'deny.*ip.*\.255', config_text):
+        acl_protections['broadcast'] = True
+    
+    # Bogon 네트워크 차단 확인
+    bogon_patterns = [
+        r'deny.*ip.*0\.0\.0\.0',
+        r'deny.*ip.*169\.254\.0\.0'
+    ]
+    if any(re.search(pattern, config_text) for pattern in bogon_patterns):
+        acl_protections['bogons'] = True
+    
+    return acl_protections
+
+
+def _is_private_ip(ip_address: str) -> bool:
+    """사설 IP 대역 확인"""
+    if re.match(r'^10\.', ip_address):
+        return True
+    if re.match(r'^172\.(1[6-9]|2[0-9]|3[0-1])\.', ip_address):
+        return True
+    if re.match(r'^192\.168\.', ip_address):
+        return True
+    return False
 
 
 def check_ddos_protection(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
@@ -488,7 +726,7 @@ def check_ddos_protection(line: str, line_num: int, context: ConfigContext) -> L
     ddos_protection_found = False
     
     for line in context.config_lines:
-        if any(pattern in line.lower() for pattern in ['tcp intercept', 'rate-limit', 'ip verify']):
+        if any(pattern in line.lower() for pattern in ['ip access-list']):
             ddos_protection_found = True
             break
     
@@ -720,27 +958,183 @@ def check_auxiliary_port_security(line: str, line_num: int, context: ConfigConte
     """N-17: 불필요한 보조 입·출력 포트 사용 금지 - 논리 기반 분석"""
     vulnerabilities = []
     
-    # AUX 포트 설정 확인
-    aux_port_secure = False
+    # AUX 포트 보안 설정 확인
+    aux_issues = _check_aux_port_security(context)
+    vulnerabilities.extend(aux_issues)
     
-    for line in context.config_lines:
-        if line.strip().startswith('line aux'):
-            # AUX 포트 보안 설정 확인
-            if 'no exec' in context.full_config and 'transport input none' in context.full_config:
-                aux_port_secure = True
-            break
-    
-    if not aux_port_secure:
-        vulnerabilities.append({
-            'line': 0,
-            'matched_text': 'AUX port not properly secured',
-            'details': {
-                'vulnerability': 'aux_port_not_secured',
-                'recommendation': 'Configure AUX port with: no exec, transport input none'
-            }
-        })
+    # Console 포트 보안 설정 확인
+    console_issues = _check_console_port_security(context)
+    vulnerabilities.extend(console_issues)
     
     return vulnerabilities
+
+
+def _check_aux_port_security(context: ConfigContext) -> List[Dict[str, Any]]:
+    """AUX 포트 보안 설정 확인"""
+    issues = []
+    
+    # AUX 라인 설정 찾기
+    config_lines = context.config_lines
+    aux_line_found = False
+    aux_line_number = 0
+    aux_config = {
+        'has_no_exec': False,
+        'transport_input_none': False,
+        'has_password': False,
+        'exec_timeout_zero': False
+    }
+    
+    in_aux_section = False
+    
+    for i, line in enumerate(config_lines):
+        line_clean = line.strip()
+        original_line = line
+        
+        # AUX 라인 시작
+        if line_clean.startswith('line aux'):
+            aux_line_found = True
+            aux_line_number = i + 1
+            in_aux_section = True
+            continue
+            
+        # AUX 섹션 내부 설정
+        elif in_aux_section and original_line.startswith(' '):
+            if 'no exec' in line_clean:
+                aux_config['has_no_exec'] = True
+            elif 'transport input none' in line_clean:
+                aux_config['transport_input_none'] = True
+            elif 'password' in line_clean:
+                aux_config['has_password'] = True
+            elif 'exec-timeout 0' in line_clean:
+                aux_config['exec_timeout_zero'] = True
+                
+        # 다른 섹션 시작하면 AUX 섹션 종료
+        elif in_aux_section and not original_line.startswith(' ') and line_clean:
+            in_aux_section = False
+    
+    if aux_line_found:
+        # AUX 포트가 설정되었지만 보안 설정이 부족한 경우
+        security_issues = []
+        
+        if not aux_config['has_no_exec']:
+            security_issues.append('exec_enabled')
+            
+        if not aux_config['transport_input_none']:
+            security_issues.append('transport_input_not_disabled')
+            
+        if aux_config['has_password'] and not aux_config['has_no_exec']:
+            security_issues.append('password_set_but_exec_enabled')
+            
+        if aux_config['exec_timeout_zero']:
+            security_issues.append('infinite_timeout')
+        
+        if security_issues:
+            issues.append({
+                'line': aux_line_number,
+                'matched_text': 'line aux 0 (insecure configuration)',
+                'details': {
+                    'port_type': 'aux',
+                    'vulnerability': 'aux_port_not_secured',
+                    'security_issues': security_issues,
+                    'current_config': aux_config,
+                    'recommendation': 'Configure: no exec, transport input none to secure AUX port',
+                    'severity_adjusted': 'High'
+                }
+            })
+    
+    return issues
+
+
+def _check_console_port_security(context: ConfigContext) -> List[Dict[str, Any]]:
+    """Console 포트 보안 설정 확인"""
+    issues = []
+    
+    # Console 라인 설정 찾기
+    config_lines = context.config_lines
+    console_line_found = False
+    console_line_number = 0
+    console_config = {
+        'has_password': False,
+        'has_login': False,
+        'exec_timeout': None,
+        'has_logging_sync': False
+    }
+    
+    in_console_section = False
+    
+    for i, line in enumerate(config_lines):
+        line_clean = line.strip()
+        original_line = line
+        
+        # Console 라인 시작 (line con 0 또는 line console 0)
+        if line_clean.startswith('line con') or line_clean.startswith('line console'):
+            console_line_found = True
+            console_line_number = i + 1
+            in_console_section = True
+            continue
+            
+        # Console 섹션 내부 설정
+        elif in_console_section and original_line.startswith(' '):
+            if 'password' in line_clean:
+                console_config['has_password'] = True
+            elif line_clean in ['login', 'login local']:
+                console_config['has_login'] = True
+            elif 'exec-timeout' in line_clean:
+                # exec-timeout 값 파싱
+                parts = line_clean.split()
+                if len(parts) >= 2:
+                    try:
+                        minutes = int(parts[1])
+                        seconds = int(parts[2]) if len(parts) > 2 else 0
+                        console_config['exec_timeout'] = minutes * 60 + seconds
+                    except:
+                        pass
+            elif 'logging synchronous' in line_clean:
+                console_config['has_logging_sync'] = True
+                
+        # 다른 섹션 시작하면 Console 섹션 종료
+        elif in_console_section and not original_line.startswith(' ') and line_clean:
+            in_console_section = False
+    
+    if console_line_found:
+        # Console 포트 보안 권고사항 확인
+        recommendations = []
+        
+        # 패스워드가 없는 경우
+        if not console_config['has_password']:
+            recommendations.append('set_console_password')
+            
+        # 로그인 설정이 없는 경우
+        if not console_config['has_login']:
+            recommendations.append('configure_login')
+            
+        # 무제한 타임아웃인 경우
+        if console_config['exec_timeout'] == 0:
+            recommendations.append('set_exec_timeout')
+            
+        # 로깅 동기화가 없는 경우 (보안과 직접 관련은 없지만 권고)
+        if not console_config['has_logging_sync']:
+            recommendations.append('enable_logging_sync')
+        
+        # 심각한 보안 문제만 보고 (패스워드나 로그인이 없는 경우)
+        critical_issues = [r for r in recommendations if r in ['set_console_password', 'configure_login']]
+        
+        if critical_issues:
+            issues.append({
+                'line': console_line_number,
+                'matched_text': 'line con 0 (security recommendations)',
+                'details': {
+                    'port_type': 'console',
+                    'vulnerability': 'console_port_security_recommendations',
+                    'critical_issues': critical_issues,
+                    'all_recommendations': recommendations,
+                    'current_config': console_config,
+                    'recommendation': 'Secure console port with password and login configuration',
+                    'severity_adjusted': 'Medium' if 'set_console_password' in critical_issues else 'Low'
+                }
+            })
+    
+    return issues
 
 
 def check_login_banner_message(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
@@ -794,32 +1188,47 @@ def check_logging_buffer_size(line: str, line_num: int, context: ConfigContext) 
     
     # 로깅 버퍼 크기 확인
     buffer_size = None
+    buffer_line_num = 0
     
-    for line in context.config_lines:
-        match = re.match(r'^logging\s+buffered\s+(\d+)', line.strip())
+    for i, line in enumerate(context.config_lines):
+        match = re.match(r'^logging\s+(buffer|buffered)\s+(\d+)', line.strip())
         if match:
-            buffer_size = int(match.group(1))
+            buffer_size = int(match.group(2))
+            buffer_line_num = i + 1
             break
     
-    if buffer_size is None:
-        vulnerabilities.append({
-            'line': 0,
-            'matched_text': 'Logging buffer size not configured',
-            'details': {
-                'vulnerability': 'no_logging_buffer_size',
-                'recommendation': 'Configure appropriate logging buffer size (16000-32000 bytes)'
-            }
-        })
-    elif buffer_size < 16000:
-        vulnerabilities.append({
-            'line': 0,
-            'matched_text': f'Logging buffer size too small ({buffer_size})',
-            'details': {
-                'vulnerability': 'insufficient_logging_buffer_size',
-                'current_size': buffer_size,
-                'recommendation': 'Increase logging buffer size to at least 16000 bytes'
-            }
-        })
+    # 로깅이 활성화되어 있는지 확인
+    logging_enabled = any([
+        'logging' in line and not line.strip().startswith('!')
+        for line in context.config_lines
+    ])
+    
+    if logging_enabled:
+        if buffer_size is None:
+            # 버퍼 크기가 명시되지 않음 (기본값 사용)
+            vulnerabilities.append({
+                'line': 0,
+                'matched_text': 'Logging buffer size not explicitly configured',
+                'details': {
+                    'vulnerability': 'no_explicit_logging_buffer_size',
+                    'current_status': 'using_default_size',
+                    'recommendation': '로깅 버퍼 크기를 명시적으로 설정하세요. 권장 크기는 16,384바이트에서 32,768바이트 사이입니다.',
+                    'severity_adjusted': 'Medium'
+                }
+            })
+        elif buffer_size < 16000:  # 16KB 미만
+            # 버퍼 크기가 너무 작음
+            vulnerabilities.append({
+                'line': buffer_line_num,
+                'matched_text': f'logging buffered {buffer_size}',
+                'details': {
+                    'vulnerability': 'insufficient_logging_buffer_size',
+                    'current_size': buffer_size,
+                    'recommended_minimum': 16000,
+                    'recommendation': 'Increase logging buffer size to at least 16KB',
+                    'severity_adjusted': 'Medium'
+                }
+            })
     
     return vulnerabilities
 
@@ -829,7 +1238,7 @@ def check_logging_policy_configuration(line: str, line_num: int, context: Config
     vulnerabilities = []
     
     # 기본 로깅 설정 확인
-    logging_enabled = any(line.strip().startswith('logging on') for line in context.config_lines)
+    logging_enabled = any(line.strip().startswith('logging') for line in context.config_lines)
     
     if not logging_enabled:
         vulnerabilities.append({
