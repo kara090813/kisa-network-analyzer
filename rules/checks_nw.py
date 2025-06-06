@@ -71,14 +71,13 @@ def check_nw_01(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
 
 
 def check_nw_02(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """NW-02: 패스워드 복잡성 설정 - 개선된 논리 기반 분석"""
+    """NW-02: 패스워드 복잡성 설정 - 수정된 버전 (secret 사용자 고려)"""
     vulnerabilities = []
     
     # secret 타입 사용자 확인
-    has_secret_users = any(
-        user.get('password_type') == 'secret' 
-        for user in context.parsed_users
-    )
+    total_users = len(context.parsed_users)
+    secret_users = [user for user in context.parsed_users if user.get('password_type') == 'secret']
+    has_secret_users = len(secret_users) > 0
     
     # enable secret 사용 확인
     has_enable_secret = context.global_settings.get('enable_password_type') == 'secret'
@@ -93,35 +92,33 @@ def check_nw_02(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
         'security passwords min-length' in context.full_config
     ])
     
+    # 🔧 수정: secret 사용자 비율 고려
+    if total_users > 0:
+        secret_ratio = len(secret_users) / total_users
+        # 80% 이상이 secret 사용하면 충분히 안전
+        if secret_ratio >= 0.8:
+            return vulnerabilities
+    
     # 복잡성 정책이 필요한지 판단
-    needs_complexity_policy = False
-    weak_passwords = []
+    weak_passwords = [user for user in context.parsed_users 
+                     if user.get('password_type') == 'password' and 
+                     user['has_password'] and not user['password_encrypted']]
     
-    for user in context.parsed_users:
-        # secret 타입은 제외 (이미 복잡성 보장)
-        if user.get('password_type') == 'secret':
-            continue
-            
-        if user['has_password'] and not user['password_encrypted']:
-            needs_complexity_policy = True
-            weak_passwords.append(user)
-    
-    # 정책이 없고 약한 패스워드가 있는 경우만 보고
-    if needs_complexity_policy and not has_min_length and not password_encryption_enabled:
+    # 🔧 수정: weak password가 있는 경우만 정책 확인
+    if weak_passwords and not has_min_length and not password_encryption_enabled:
         vulnerabilities.append({
             'line': 0,
             'matched_text': '패스워드 복잡성 정책 설정 필요',
             'details': {
                 'vulnerability': 'no_password_complexity_policy',
-                'has_secret_users': has_secret_users,
-                'has_enable_secret': has_enable_secret,
                 'weak_password_count': len(weak_passwords),
+                'secret_user_count': len(secret_users),
                 'recommendation': 'Configure password complexity policy or use secret passwords',
                 'severity_adjusted': 'Medium' if has_secret_users else 'High'
             }
         })
     
-    # 개별 약한 패스워드 검사
+    # 개별 약한 패스워드 검사 (secret 제외)
     for user in weak_passwords:
         vulnerabilities.append({
             'line': user['line_number'],
@@ -266,7 +263,7 @@ def _parse_users_from_config(config_lines: List[str]) -> List[Dict[str, Any]]:
 
 
 def check_nw_05(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """NW-05: VTY 접근(ACL) 설정 - 개선된 논리 기반 분석"""
+    """NW-05: VTY 접근(ACL) 설정 - 수정된 버전 (transport input none 고려)"""
     vulnerabilities = []
     
     if not context.vty_lines:
@@ -283,18 +280,24 @@ def check_nw_05(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
     for vty_line in context.vty_lines:
         issues = []
         
-        # Access-class 확인
-        if not vty_line['has_access-class']:
-            issues.append('no_access-class')
-        
-        # Transport input 확인  
+        # 🔧 수정: transport input none은 안전한 설정
         transport_input = vty_line.get('transport_input', [])
-        if 'all' in transport_input:
-            issues.append('transport_all_allowed')
+        if 'none' in transport_input:
+            continue  # 완전 차단이므로 안전
         
-        # 패스워드 확인
-        if not vty_line['has_password'] and vty_line.get('login_method') != 'login local':
-            issues.append('no_authentication')
+        # 접속이 허용되는 경우만 보안 설정 확인
+        if transport_input and 'none' not in transport_input:
+            # Access-class 확인
+            if not vty_line['has_access_class']:
+                issues.append('no_access-class')
+            
+            # Transport input 확인  
+            if 'all' in transport_input:
+                issues.append('transport_all_allowed')
+            
+            # 패스워드 확인
+            if not vty_line['has_password'] and vty_line.get('login_method') != 'login local':
+                issues.append('no_authentication')
         
         if issues:
             vulnerability_details = {
@@ -303,9 +306,9 @@ def check_nw_05(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
                 'details': {
                     'issues': issues,
                     'vty_config': vty_line,
-                    'has_access-class': vty_line['has_access-class'],
+                    'has_access_class': vty_line['has_access_class'],
                     'transport_input': transport_input,
-                    'access-class': vty_line.get('access-class'),
+                    'access_class': vty_line.get('access_class'),
                     'recommendation': 'VTY 라인에 access-class를 설정하여 접속 가능한 IP를 제한하세요.'
                 }
             }
@@ -371,10 +374,6 @@ def check_nw_06(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
                 })
     
     return vulnerabilities
-
-
-
-
 
 
 def check_nw_07(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
@@ -593,6 +592,7 @@ def _check_console_port_security(context: ConfigContext) -> List[Dict[str, Any]]
             })
     
     return issues
+
 
 def check_nw_09(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """NW-09: 로그온 시 경고 메시지 설정 - 🔥 정확한 라인 번호 제공"""
@@ -891,11 +891,15 @@ def check_nw_16(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
 
 
 def check_nw_17(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """NW-17: SNMP community string 복잡성 설정 - 개선된 논리 기반 분석"""
+    """NW-17: SNMP community string 복잡성 설정 - 수정된 버전 (실용적 기준)"""
     vulnerabilities = []
     
     if not context.snmp_communities:
         return vulnerabilities
+    
+    # 🔧 수정: 네트워크 환경 분석
+    network_analysis = _analyze_network_environment(context)
+    is_internal_only = not network_analysis['has_external_connection']
     
     for community_info in context.snmp_communities:
         issues = []
@@ -911,48 +915,37 @@ def check_nw_17(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
             issues.append('very_short')
             severity = '중'
         
-        # 3. 짧은 길이 확인 (6자 미만, ACL 여부에 따라 다르게 처리)
-        elif community_info['length'] < 6:
-            if not community_info.get('acl'):  # ACL이 없으면 더 위험
-                issues.append('short_without_acl')
-                severity = '중'
-            else:
-                issues.append('short_with_acl')
+        # 🔧 수정: 내부 네트워크는 완화된 기준 적용
+        elif is_internal_only:
+            # 내부 전용 네트워크: 6자 이상 + ACL 있으면 충분
+            if community_info['length'] >= 6 and community_info.get('acl'):
+                continue  # 충분히 안전하므로 문제 없음
+            elif community_info['length'] < 6:
+                issues.append('short_internal_network')
                 severity = '하'
         
-        # 4. 매우 단순한 패턴 확인 (정말 위험한 것들만)
-        community = community_info['community'].lower()
-        very_simple_patterns = [
-            'public', 'private',  # 기본값들
-            '123', '1234', '12345',  # 연속 숫자
-            'admin', 'test', 'temp',  # 일반적인 단어
-            'cisco', 'router', 'switch',  # 장비 관련 단어
-            'snmp', 'community'  # 프로토콜 관련 단어
-        ]
-        
-        if any(pattern == community or pattern in community for pattern in very_simple_patterns):
-            issues.append('predictable_pattern')
-            # ACL이 있어도 예측 가능한 패턴은 위험
-            severity = '중' if community_info.get('acl') else '상'
-        
-        # 5. 극도로 단순한 복잡성 (3자 이하이고 숫자만 또는 같은 문자 반복)
-        elif len(community) <= 3 and (community.isdigit() or len(set(community)) == 1):
-            issues.append('extremely_simple')
-            severity = '중'
-        
-        # 6. 단순한 복잡성 (6자 이상이지만 숫자만 또는 문자만, ACL 고려)
-        elif len(community) >= 6 and (community.isdigit() or community.isalpha()):
-            if not community_info.get('acl'):
-                issues.append('lacks_complexity_no_acl')
-                severity = '하'
-            # ACL이 있고 6자 이상이면 복잡성 부족은 경미한 문제로 처리
-            # issues에 추가하지 않음 (정상으로 간주)
-        
-        # 7. ACL 없는 경우 추가 위험도
-        if not community_info.get('acl') and not issues:
-            # 다른 문제가 없어도 ACL이 없으면 권고사항 제시
-            issues.append('no_access_control')
-            severity = '하'
+        # 3. 외부 연결이 있는 경우 엄격한 기준
+        else:
+            # 짧은 길이 확인 (6자 미만, ACL 여부에 따라 다르게 처리)
+            if community_info['length'] < 6:
+                if not community_info.get('acl'):
+                    issues.append('short_without_acl')
+                    severity = '중'
+                else:
+                    issues.append('short_with_acl')
+                    severity = '하'
+            
+            # 매우 단순한 패턴 확인
+            community = community_info['community'].lower()
+            very_simple_patterns = [
+                'public', 'private', '123', '1234', '12345',
+                'admin', 'test', 'temp', 'cisco', 'router', 'switch',
+                'snmp', 'community'
+            ]
+            
+            if any(pattern == community or pattern in community for pattern in very_simple_patterns):
+                issues.append('predictable_pattern')
+                severity = '중' if community_info.get('acl') else '상'
         
         # 취약점이 발견된 경우만 보고
         if issues:
@@ -961,14 +954,10 @@ def check_nw_17(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
             
             if 'default_community' in issues:
                 recommendations.append("기본 커뮤니티 스트링(public, private)을 사용하지 마세요")
-            if any(issue in issues for issue in ['very_short', 'short_without_acl', 'short_with_acl']):
+            if any(issue in issues for issue in ['very_short', 'short_without_acl', 'short_with_acl', 'short_internal_network']):
                 recommendations.append("커뮤니티 스트링은 최소 6자 이상으로 설정하세요")
-            if 'predictable_pattern' in issues or 'extremely_simple' in issues:
+            if 'predictable_pattern' in issues:
                 recommendations.append("예측하기 어려운 복잡한 문자열을 사용하세요")
-            if 'lacks_complexity_no_acl' in issues:
-                recommendations.append("숫자와 문자를 조합하거나 ACL을 적용하세요")
-            if 'no_access_control' in issues:
-                recommendations.append("SNMP 접근 제어를 위해 ACL을 적용하는 것을 권장합니다")
             
             # 심각도별 메시지 조정
             if severity == '상':
@@ -989,6 +978,7 @@ def check_nw_17(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
                     'has_acl': bool(community_info.get('acl')),
                     'acl_name': community_info.get('acl'),
                     'permission': community_info.get('permission', 'RO'),
+                    'network_type': 'internal' if is_internal_only else 'external',
                     'severity_adjusted': severity,
                     'vulnerability': 'weak_snmp_community',
                     'main_message': main_message,

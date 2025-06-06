@@ -13,7 +13,8 @@ from .loader import (
     ConfigContext, 
     LogicalCondition, 
     SecurityRule, 
-    _parse_line_configs
+    _parse_line_configs,
+    _analyze_network_environment
 )
 from .cisco_defaults import CiscoDefaults
 
@@ -399,7 +400,7 @@ def check_snmp_service_status(line: str, line_num: int, context: ConfigContext) 
 
 
 def check_snmp_security(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """N-08: SNMP Community String 복잡성 - 개선된 논리 기반 분석"""
+    """N-08: SNMP Community String 복잡성 - 오탐/미탐 수정된 버전"""
     vulnerabilities = []
     
     if not context.snmp_communities:
@@ -409,82 +410,68 @@ def check_snmp_security(line: str, line_num: int, context: ConfigContext) -> Lis
         issues = []
         severity = '하'  # 기본 심각도
         
-        # 1. 기본 커뮤니티 스트링 확인 (가장 위험)
+        # 1. 기본 커뮤니티 스트링 확인 (ACL 있어도 매우 위험)
         if community_info['is_default']:
             issues.append('default_community')
-            severity = '상'  # 기본 커뮤니티는 매우 위험
+            severity = '상'  # ACL과 상관없이 기본 커뮤니티는 매우 위험
         
-        # 2. 매우 짧은 길이 확인 (4자 미만은 매우 위험)
+        # 2. 매우 짧은 길이 확인 (4자 미만은 ACL 있어도 위험)
         elif community_info['length'] < 4:
             issues.append('very_short')
-            severity = '중'
+            severity = '중'  # ACL이 있어도 너무 짧으면 위험
         
-        # 3. 짧은 길이 확인 (6자 미만, ACL 여부에 따라 다르게 처리)
-        elif community_info['length'] < 6:
-            if not community_info.get('acl'):  # ACL이 없으면 더 위험
-                issues.append('short_without_acl')
+        # 3. ACL 효과성 검증 - 개선된 부분
+        acl_name = community_info.get('acl')
+        acl_effectiveness = 'none'
+        
+        if acl_name:
+            # ACL의 실제 효과성 분석
+            acl_effectiveness = _analyze_acl_effectiveness(context, acl_name)
+        
+        # 4. 짧은 길이 확인 (6자 미만, ACL 효과성에 따라 다르게 처리)
+        if 4 <= community_info['length'] < 6:
+            if acl_effectiveness in ['none', 'weak']:
+                issues.append('short_without_effective_acl')
                 severity = '중'
-            else:
-                issues.append('short_with_acl')
+            elif acl_effectiveness == 'moderate':
+                issues.append('short_with_moderate_acl')
                 severity = '하'
+            # strong ACL이 있으면 6자 미만도 허용
         
-        # 4. 매우 단순한 패턴 확인 (정말 위험한 것들만)
+        # 5. 예측 가능한 패턴 확인
         community = community_info['community'].lower()
-        very_simple_patterns = [
-            'public', 'private',  # 기본값들
-            '123', '1234', '12345',  # 연속 숫자
-            'admin', 'test', 'temp',  # 일반적인 단어
-            'cisco', 'router', 'switch',  # 장비 관련 단어
-            'snmp', 'community'  # 프로토콜 관련 단어
+        predictable_patterns = [
+            'public', 'private', '123', '1234', '12345',
+            'admin', 'test', 'temp', 'cisco', 'router', 
+            'switch', 'snmp', 'community', 'read', 'write'
         ]
         
-        if any(pattern == community or pattern in community for pattern in very_simple_patterns):
+        if any(pattern == community or pattern in community for pattern in predictable_patterns):
             issues.append('predictable_pattern')
-            # ACL이 있어도 예측 가능한 패턴은 위험
-            severity = '중' if community_info.get('acl') else '상'
+            # ACL이 강력해도 예측 가능한 패턴은 중간 위험
+            severity = '중' if acl_effectiveness == 'strong' else '상'
         
-        # 5. 극도로 단순한 복잡성 (3자 이하이고 숫자만 또는 같은 문자 반복)
-        elif len(community) <= 3 and (community.isdigit() or len(set(community)) == 1):
-            issues.append('extremely_simple')
-            severity = '중'
-        
-        # 6. 단순한 복잡성 (6자 이상이지만 숫자만 또는 문자만, ACL 고려)
+        # 6. 복잡성 부족 (6자 이상이지만 단순한 패턴)
         elif len(community) >= 6 and (community.isdigit() or community.isalpha()):
-            if not community_info.get('acl'):
-                issues.append('lacks_complexity_no_acl')
+            if acl_effectiveness in ['none', 'weak']:
+                issues.append('lacks_complexity_no_effective_acl')
                 severity = '하'
-            # ACL이 있고 6자 이상이면 복잡성 부족은 경미한 문제로 처리
-            # issues에 추가하지 않음 (정상으로 간주)
+            # 강력한 ACL이 있으면 단순한 패턴도 허용
         
-        # 7. ACL 없는 경우 추가 위험도
-        if not community_info.get('acl') and not issues:
-            # 다른 문제가 없어도 ACL이 없으면 권고사항 제시
-            issues.append('no_access_control')
+        # 7. ACL이 없거나 약한 경우
+        if acl_effectiveness in ['none', 'weak'] and not issues:
+            issues.append('no_effective_access_control')
             severity = '하'
         
         # 취약점이 발견된 경우만 보고
         if issues:
-            # 권고사항 생성
-            recommendations = []
-            
-            if 'default_community' in issues:
-                recommendations.append("기본 커뮤니티 스트링(public, private)을 사용하지 마세요")
-            if any(issue in issues for issue in ['very_short', 'short_without_acl', 'short_with_acl']):
-                recommendations.append("커뮤니티 스트링은 최소 6자 이상으로 설정하세요")
-            if 'predictable_pattern' in issues or 'extremely_simple' in issues:
-                recommendations.append("예측하기 어려운 복잡한 문자열을 사용하세요")
-            if 'lacks_complexity_no_acl' in issues:
-                recommendations.append("숫자와 문자를 조합하거나 ACL을 적용하세요")
-            if 'no_access_control' in issues:
-                recommendations.append("SNMP 접근 제어를 위해 ACL을 적용하는 것을 권장합니다")
-            
-            # 심각도별 메시지 조정
-            if severity == '상':
-                main_message = f"SNMP 커뮤니티 '{community_info['community']}'에 심각한 보안 문제가 있습니다"
-            elif severity == '중':
-                main_message = f"SNMP 커뮤니티 '{community_info['community']}'의 보안을 강화해야 합니다"
-            else:
-                main_message = f"SNMP 커뮤니티 '{community_info['community']}'의 보안 권고사항이 있습니다"
+            # ACL 효과성 정보 포함
+            acl_info = {
+                'has_acl': bool(acl_name),
+                'acl_name': acl_name,
+                'acl_effectiveness': acl_effectiveness,
+                'acl_analysis': _get_acl_analysis_detail(context, acl_name) if acl_name else None
+            }
             
             vulnerabilities.append({
                 'line': community_info['line_number'],
@@ -494,17 +481,84 @@ def check_snmp_security(line: str, line_num: int, context: ConfigContext) -> Lis
                     'issues': issues,
                     'community_length': community_info['length'],
                     'is_default': community_info['is_default'],
-                    'has_acl': bool(community_info.get('acl')),
-                    'acl_name': community_info.get('acl'),
                     'permission': community_info.get('permission', 'RO'),
                     'severity_adjusted': severity,
                     'vulnerability': 'weak_snmp_community',
-                    'main_message': main_message,
-                    'recommendation': '. '.join(recommendations)
+                    'acl_info': acl_info,
+                    'recommendation': _generate_snmp_recommendation(issues, acl_effectiveness)
                 }
             })
     
     return vulnerabilities
+
+
+def _analyze_acl_effectiveness(context: ConfigContext, acl_name: str) -> str:
+    """ACL의 실제 효과성 분석"""
+    if not acl_name:
+        return 'none'
+    
+    # ACL 정의 찾기
+    acl_lines = []
+    for line in context.config_lines:
+        if f'access-list {acl_name}' in line or f'ip access-list {acl_name}' in line:
+            acl_lines.append(line.strip())
+    
+    if not acl_lines:
+        return 'weak'  # ACL이 참조되었지만 정의되지 않음
+    
+    # ACL 내용 분석
+    permit_any = False
+    has_specific_restrictions = False
+    
+    for line in acl_lines:
+        if 'permit' in line and 'any' in line:
+            permit_any = True
+        if 'permit' in line and any(pattern in line for pattern in ['host', '/24', '/25', '/26', '/27', '/28', '/29', '/30']):
+            has_specific_restrictions = True
+        if 'deny' in line:
+            has_specific_restrictions = True
+    
+    if permit_any and not has_specific_restrictions:
+        return 'weak'  # permit any만 있음
+    elif has_specific_restrictions:
+        return 'strong' if not permit_any else 'moderate'
+    else:
+        return 'moderate'
+
+
+def _get_acl_analysis_detail(context: ConfigContext, acl_name: str) -> Dict[str, Any]:
+    """ACL 상세 분석 정보"""
+    if not acl_name:
+        return None
+    
+    acl_lines = []
+    for line in context.config_lines:
+        if f'access-list {acl_name}' in line:
+            acl_lines.append(line.strip())
+    
+    return {
+        'acl_exists': len(acl_lines) > 0,
+        'rule_count': len(acl_lines),
+        'has_permit_any': any('permit' in line and 'any' in line for line in acl_lines),
+        'has_specific_permits': any('permit' in line and 'host' in line for line in acl_lines),
+        'has_deny_rules': any('deny' in line for line in acl_lines)
+    }
+
+
+def _generate_snmp_recommendation(issues: List[str], acl_effectiveness: str) -> str:
+    """SNMP 권고사항 생성"""
+    recommendations = []
+    
+    if 'default_community' in issues:
+        recommendations.append("기본 커뮤니티 스트링(public, private) 사용 금지")
+    if any('short' in issue for issue in issues):
+        recommendations.append("커뮤니티 스트링 길이를 8자 이상으로 설정")
+    if 'predictable_pattern' in issues:
+        recommendations.append("예측하기 어려운 복잡한 문자열 사용")
+    if 'no_effective_access_control' in issues or acl_effectiveness in ['none', 'weak']:
+        recommendations.append("효과적인 ACL 적용 (특정 IP/네트워크만 허용)")
+    
+    return '; '.join(recommendations)
 
 
 def check_snmp_acl_configuration(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
@@ -568,101 +622,73 @@ def check_tftp_service_status(line: str, line_num: int, context: ConfigContext) 
 
 
 def check_anti_spoofing_filtering(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """N-12: Spoofing 방지 필터링 적용 - 논리 기반 분석"""
+    """N-12: Spoofing 방지 필터링 - ACL 효과성 검증 강화"""
     vulnerabilities = []
     
     # 네트워크 환경 분석
     network_analysis = _analyze_network_environment(context)
     
-    # 외부 연결이 없는 내부 전용 네트워크는 낮은 우선순위
+    # 외부 연결이 없는 내부 전용 네트워크는 권고 수준
     if not network_analysis['has_external_connection']:
-        # 내부 전용 네트워크에서는 정보성 메시지만
         vulnerabilities.append({
             'line': 0,
-            'matched_text': 'Internal network - Spoofing protection optional',
+            'matched_text': 'Internal network - Spoofing protection recommended',
             'details': {
                 'vulnerability': 'spoofing_protection_info',
                 'network_type': 'internal_only',
                 'recommendation': 'Consider spoofing protection for security best practices',
-                'severity_adjusted': 'Info',
-                'external_interfaces': network_analysis['external_interfaces']
+                'severity_adjusted': 'Low'
             }
         })
         return vulnerabilities
     
-    # ACL 내용 분석 (기존 로직 유지하되 개선)
-    acl_protections = _analyze_spoofing_protection_acls(context)
-    protection_count = sum(acl_protections.values())
+    # 외부 인터페이스별 스푸핑 방지 ACL 효과성 분석
+    external_interfaces = network_analysis['external_interfaces']
     
-    # 외부 인터페이스가 있는데 보호가 부족한 경우만 보고
-    if protection_count < 3:  # 기본적인 보호 수준
-        missing = [k for k, v in acl_protections.items() if not v]
+    for interface_name in external_interfaces:
+        interface_config = context.parsed_interfaces.get(interface_name, {})
+        acl_protection = _analyze_interface_spoofing_protection(context, interface_name, interface_config)
         
-        severity = 'High' if protection_count == 0 else 'Medium'
-        
-        vulnerabilities.append({
-            'line': 0,
-            'matched_text': 'Spoofing protection insufficient for external-facing network',
-            'details': {
-                'vulnerability': 'insufficient_spoofing_protection',
-                'network_type': 'external_facing',
-                'protection_level': protection_count,
-                'missing_protections': missing,
-                'external_interfaces': network_analysis['external_interfaces'],
-                'recommendation': 'Implement spoofing protection ACLs for: ' + ', '.join(missing),
-                'severity_adjusted': severity
-            }
-        })
+        if acl_protection['protection_level'] < 3:  # 기본 보호 수준 미달
+            missing_protections = acl_protection['missing_protections']
+            ineffective_acls = acl_protection['ineffective_acls']
+            
+            severity = 'High' if acl_protection['protection_level'] == 0 else 'Medium'
+            
+            vulnerabilities.append({
+                'line': interface_config.get('line_number', 0),
+                'matched_text': f'interface {interface_name} - insufficient spoofing protection',
+                'details': {
+                    'vulnerability': 'insufficient_spoofing_protection',
+                    'interface_name': interface_name,
+                    'network_type': 'external_facing',
+                    'protection_level': acl_protection['protection_level'],
+                    'missing_protections': missing_protections,
+                    'ineffective_acls': ineffective_acls,
+                    'applied_acls': acl_protection['applied_acls'],
+                    'recommendation': f'Strengthen spoofing protection on {interface_name}: ' + ', '.join(missing_protections),
+                    'severity_adjusted': severity
+                }
+            })
     
     return vulnerabilities
 
 
-def _analyze_network_environment(context: ConfigContext) -> Dict[str, Any]:
-    """네트워크 환경 분석"""
-    external_interfaces = []
-    has_nat = False
-    has_public_ip = False
+def _analyze_interface_spoofing_protection(context: ConfigContext, interface_name: str, interface_config: Dict) -> Dict[str, Any]:
+    """인터페이스별 스푸핑 방지 효과성 분석"""
     
-    for interface_name, interface_config in context.parsed_interfaces.items():
-        # NAT outside 인터페이스 확인
-        config_lines = interface_config.get('config_lines', [])
-        if any('nat outside' in line for line in config_lines):
-            external_interfaces.append(interface_name)
-            has_nat = True
-        
-        # 공인 IP 확인
-        ip_address = interface_config.get('ip_address', '')
-        if ip_address and not _is_private_ip(ip_address):
-            external_interfaces.append(interface_name)
-            has_public_ip = True
-        
-        # 설명 기반 외부 인터페이스 판단
-        description = interface_config.get('description', '').lower()
-        external_keywords = ['isp', 'internet', 'wan', 'external', 'outside', 'uplink']
-        if any(keyword in description for keyword in external_keywords):
-            external_interfaces.append(interface_name)
+    # 인터페이스에 적용된 ACL 찾기
+    applied_acls = []
+    config_lines = interface_config.get('config_lines', [])
     
-    return {
-        'has_external_connection': len(external_interfaces) > 0,
-        'external_interfaces': list(set(external_interfaces)),
-        'has_nat': has_nat,
-        'has_public_ip': has_public_ip
-    }
-
-def _is_private_ip(ip_address: str) -> bool:
-    """사설 IP 대역 확인"""
-    if re.match(r'^10\.', ip_address):
-        return True
-    if re.match(r'^172\.(1[6-9]|2[0-9]|3[0-1])\.', ip_address):
-        return True
-    if re.match(r'^192\.168\.', ip_address):
-        return True
-    return False
-
-
-def _analyze_spoofing_protection_acls(context: ConfigContext) -> Dict[str, bool]:
-    """스푸핑 방지 ACL 분석"""
-    acl_protections = {
+    for line in config_lines:
+        if 'ip access-group' in line and 'in' in line:
+            acl_match = re.search(r'ip access-group\s+(\S+)\s+in', line)
+            if acl_match:
+                applied_acls.append(acl_match.group(1))
+    
+    # 각 ACL의 스푸핑 방지 효과 분석
+    protection_analysis = {
         'private_ranges': False,
         'loopback': False,
         'broadcast': False,
@@ -670,52 +696,81 @@ def _analyze_spoofing_protection_acls(context: ConfigContext) -> Dict[str, bool]
         'bogons': False
     }
     
-    config_text = context.full_config.lower()
+    ineffective_acls = []
     
-    # Private IP 차단 확인
-    private_patterns = [
-        r'deny.*ip.*10\.0\.0\.0.*0\.255\.255\.255',
-        r'deny.*ip.*172\.1[6-9]\.0\.0',
-        r'deny.*ip.*172\.2[0-9]\.0\.0',
-        r'deny.*ip.*172\.3[0-1]\.0\.0',
-        r'deny.*ip.*192\.168\.0\.0.*0\.0\.255\.255'
-    ]
+    for acl_name in applied_acls:
+        acl_effectiveness = _analyze_acl_spoofing_rules(context, acl_name)
+        
+        # ACL이 permit any를 포함하면 무효화됨
+        if acl_effectiveness['has_permit_any']:
+            ineffective_acls.append(f"{acl_name} (has permit any)")
+            continue
+        
+        # 각 보호 영역 확인
+        for protection_type, is_protected in acl_effectiveness['protections'].items():
+            if is_protected:
+                protection_analysis[protection_type] = True
     
-    if any(re.search(pattern, config_text) for pattern in private_patterns):
-        acl_protections['private_ranges'] = True
+    protection_count = sum(protection_analysis.values())
+    missing_protections = [k for k, v in protection_analysis.items() if not v]
     
-    # 루프백 차단 확인
-    if re.search(r'deny.*ip.*127\.0\.0\.0', config_text):
-        acl_protections['loopback'] = True
-    
-    # 멀티캐스트 차단 확인  
-    if re.search(r'deny.*ip.*22[4-9]\.|deny.*ip.*23[0-9]\.', config_text):
-        acl_protections['multicast'] = True
-    
-    # 브로드캐스트 차단 확인
-    if re.search(r'deny.*ip.*\.255', config_text):
-        acl_protections['broadcast'] = True
-    
-    # Bogon 네트워크 차단 확인
-    bogon_patterns = [
-        r'deny.*ip.*0\.0\.0\.0',
-        r'deny.*ip.*169\.254\.0\.0'
-    ]
-    if any(re.search(pattern, config_text) for pattern in bogon_patterns):
-        acl_protections['bogons'] = True
-    
-    return acl_protections
+    return {
+        'protection_level': protection_count,
+        'missing_protections': missing_protections,
+        'applied_acls': applied_acls,
+        'ineffective_acls': ineffective_acls,
+        'protection_details': protection_analysis
+    }
 
 
-def _is_private_ip(ip_address: str) -> bool:
-    """사설 IP 대역 확인"""
-    if re.match(r'^10\.', ip_address):
-        return True
-    if re.match(r'^172\.(1[6-9]|2[0-9]|3[0-1])\.', ip_address):
-        return True
-    if re.match(r'^192\.168\.', ip_address):
-        return True
-    return False
+def _analyze_acl_spoofing_rules(context: ConfigContext, acl_name: str) -> Dict[str, Any]:
+    """ACL의 스푸핑 방지 룰 분석"""
+    
+    acl_lines = []
+    for line in context.config_lines:
+        if f'access-list {acl_name}' in line:
+            acl_lines.append(line.strip())
+    
+    protections = {
+        'private_ranges': False,
+        'loopback': False,
+        'broadcast': False,
+        'multicast': False,
+        'bogons': False
+    }
+    
+    has_permit_any = False
+    
+    for line in acl_lines:
+        line_lower = line.lower()
+        
+        # permit any 확인 (보호 무력화)
+        if 'permit' in line_lower and 'any' in line_lower:
+            has_permit_any = True
+        
+        # 스푸핑 방지 룰 확인
+        if 'deny' in line_lower:
+            # Private IP 대역
+            if any(pattern in line_lower for pattern in ['10.0.0.0', '172.16.0.0', '192.168.0.0']):
+                protections['private_ranges'] = True
+            # 루프백
+            if '127.0.0.0' in line_lower:
+                protections['loopback'] = True
+            # 멀티캐스트
+            if any(f'22{i}.0.0.0' in line_lower for i in range(4, 10)) or any(f'23{i}.0.0.0' in line_lower for i in range(0, 10)):
+                protections['multicast'] = True
+            # 브로드캐스트
+            if '.255' in line_lower:
+                protections['broadcast'] = True
+            # Bogon 네트워크
+            if any(pattern in line_lower for pattern in ['0.0.0.0', '169.254.0.0']):
+                protections['bogons'] = True
+    
+    return {
+        'protections': protections,
+        'has_permit_any': has_permit_any,
+        'total_rules': len(acl_lines)
+    }
 
 
 def check_ddos_protection(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
@@ -920,13 +975,16 @@ def check_user_privilege_levels(line: str, line_num: int, context: ConfigContext
 
 
 def check_ssh_protocol_usage(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """N-16: VTY 안전한 프로토콜 사용 - 논리 기반 분석"""
+    """N-16: VTY 안전한 프로토콜 사용 - SSH 버전 및 암호화 강화"""
     vulnerabilities = []
+    
+    # SSH 전역 설정 분석
+    ssh_config = _analyze_ssh_configuration(context)
     
     for vty_line in context.vty_lines:
         transport_input = vty_line.get('transport_input', [])
         
-        # Telnet 허용 확인
+        # 1. Telnet 허용 확인
         if 'telnet' in transport_input or 'all' in transport_input:
             vulnerabilities.append({
                 'line': vty_line['line_number'],
@@ -934,24 +992,133 @@ def check_ssh_protocol_usage(line: str, line_num: int, context: ConfigContext) -
                 'details': {
                     'vulnerability': 'telnet_allowed',
                     'transport_input': transport_input,
-                    'recommendation': 'Use transport input ssh only'
+                    'recommendation': 'Use transport input ssh only',
+                    'security_risk': 'Telnet transmits credentials in plain text',
+                    'severity_adjusted': 'High'
                 }
             })
         
-        # SSH 버전 확인
-        if 'ssh' in transport_input:
-            # SSH 버전 2 사용 여부 확인 (전역 설정에서)
-            if 'ip ssh version 2' not in context.full_config.lower():
+        # 2. SSH만 허용하는 경우 SSH 설정 품질 확인
+        elif 'ssh' in transport_input and 'telnet' not in transport_input:
+            ssh_issues = []
+            
+            # SSH 버전 확인
+            if ssh_config['version'] == 1:
+                ssh_issues.append('ssh_version_1_enabled')
+            elif ssh_config['version'] == 'both':
+                ssh_issues.append('ssh_version_both_enabled')
+            elif not ssh_config['version_specified']:
+                ssh_issues.append('ssh_version_not_specified')
+            
+            # 약한 암호화 알고리즘 확인
+            if ssh_config['weak_algorithms']:
+                ssh_issues.append('weak_encryption_algorithms')
+            
+            # Key 길이 확인
+            if ssh_config['key_bits'] and ssh_config['key_bits'] < 2048:
+                ssh_issues.append('weak_key_length')
+            
+            # 로그인 인증 방식 확인
+            if not vty_line.get('has_password') and vty_line.get('login_method') != 'login local':
+                ssh_issues.append('no_authentication_configured')
+            
+            if ssh_issues:
+                severity = 'High' if 'ssh_version_1_enabled' in ssh_issues else 'Medium'
+                
                 vulnerabilities.append({
                     'line': vty_line['line_number'],
-                    'matched_text': f"{vty_line['line']} (SSH version not specified)",
+                    'matched_text': f"{vty_line['line']} (SSH configuration issues)",
                     'details': {
-                        'vulnerability': 'ssh_version_not_specified',
-                        'recommendation': 'Add: ip ssh version 2'
+                        'vulnerability': 'ssh_configuration_weak',
+                        'ssh_issues': ssh_issues,
+                        'ssh_config': ssh_config,
+                        'recommendation': _generate_ssh_recommendations(ssh_issues),
+                        'severity_adjusted': severity
                     }
                 })
+        
+        # 3. Transport input이 none인 경우 (접근 불가)
+        elif 'none' in transport_input:
+            # 이는 보안상 안전하지만 관리 접근이 불가능함을 알림
+            vulnerabilities.append({
+                'line': vty_line['line_number'],
+                'matched_text': f"{vty_line['line']} transport input none",
+                'details': {
+                    'vulnerability': 'vty_access_disabled',
+                    'recommendation': 'VTY access is disabled. Ensure console access is available.',
+                    'severity_adjusted': 'Info'
+                }
+            })
     
     return vulnerabilities
+
+
+def _analyze_ssh_configuration(context: ConfigContext) -> Dict[str, Any]:
+    """SSH 전역 설정 분석"""
+    ssh_config = {
+        'version': None,
+        'version_specified': False,
+        'key_bits': None,
+        'weak_algorithms': [],
+        'timeout': None,
+        'retries': None
+    }
+    
+    for line in context.config_lines:
+        line_clean = line.strip().lower()
+        
+        # SSH 버전 확인
+        if 'ip ssh version' in line_clean:
+            ssh_config['version_specified'] = True
+            if 'version 1' in line_clean:
+                ssh_config['version'] = 1
+            elif 'version 2' in line_clean:
+                ssh_config['version'] = 2
+            else:
+                # version 1과 2 모두 허용하는 경우가 있을 수 있음
+                ssh_config['version'] = 'both'
+        
+        # SSH Key 길이 확인
+        elif 'crypto key generate rsa' in line_clean:
+            key_match = re.search(r'modulus\s+(\d+)', line_clean)
+            if key_match:
+                ssh_config['key_bits'] = int(key_match.group(1))
+        
+        # SSH 타임아웃 확인
+        elif 'ip ssh time-out' in line_clean:
+            timeout_match = re.search(r'time-out\s+(\d+)', line_clean)
+            if timeout_match:
+                ssh_config['timeout'] = int(timeout_match.group(1))
+        
+        # SSH 재시도 횟수 확인
+        elif 'ip ssh authentication-retries' in line_clean:
+            retries_match = re.search(r'authentication-retries\s+(\d+)', line_clean)
+            if retries_match:
+                ssh_config['retries'] = int(retries_match.group(1))
+    
+    # 기본값 설정 (버전이 명시되지 않은 경우)
+    if not ssh_config['version_specified']:
+        ssh_config['version'] = 'both'  # 기본값은 보통 1과 2 모두 허용
+    
+    return ssh_config
+
+
+def _generate_ssh_recommendations(ssh_issues: List[str]) -> str:
+    """SSH 권고사항 생성"""
+    recommendations = []
+    
+    if 'ssh_version_1_enabled' in ssh_issues:
+        recommendations.append("SSH 버전 1 비활성화 (ip ssh version 2)")
+    if 'ssh_version_both_enabled' in ssh_issues or 'ssh_version_not_specified' in ssh_issues:
+        recommendations.append("SSH 버전 2만 허용 (ip ssh version 2)")
+    if 'weak_encryption_algorithms' in ssh_issues:
+        recommendations.append("강력한 암호화 알고리즘 설정")
+    if 'weak_key_length' in ssh_issues:
+        recommendations.append("RSA 키 길이 2048비트 이상 사용")
+    if 'no_authentication_configured' in ssh_issues:
+        recommendations.append("적절한 인증 방식 설정 (login local 또는 password)")
+    
+    return '; '.join(recommendations)
 
 
 def check_auxiliary_port_security(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
@@ -1342,23 +1509,133 @@ def check_finger_service_status(line: str, line_num: int, context: ConfigContext
 
 
 def check_web_service_security(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """N-26: 웹 서비스 차단 - 논리 기반 분석"""
+    """N-26: 웹 서비스 차단 - HTTP/HTTPS 구분 및 보안 강화"""
     vulnerabilities = []
     
-    # HTTP 서버 설정 확인
-    http_server_enabled = context.parsed_services.get('http_server', False)
+    # 웹 서비스 설정 분석
+    web_services = _analyze_web_services(context)
     
-    if http_server_enabled:
-        vulnerabilities.append({
-            'line': 0,
-            'matched_text': 'HTTP server enabled',
-            'details': {
-                'vulnerability': 'http_server_enabled',
-                'recommendation': 'Disable HTTP server: no ip http server'
-            }
-        })
+    # HTTP 서버가 활성화된 경우
+    if web_services['http_enabled']:
+        # HTTPS도 함께 활성화되어 있는지 확인
+        if web_services['https_enabled']:
+            # HTTPS가 있지만 HTTP도 활성화된 경우 (보안 위험)
+            vulnerabilities.append({
+                'line': web_services['http_line'],
+                'matched_text': 'ip http server (with HTTPS enabled)',
+                'details': {
+                    'vulnerability': 'http_with_https_enabled',
+                    'recommendation': 'Disable HTTP server and use only HTTPS (no ip http server)',
+                    'security_risk': 'HTTP transmits data in plain text even when HTTPS is available',
+                    'severity_adjusted': 'Medium'
+                }
+            })
+        else:
+            # HTTP만 활성화된 경우 (높은 위험)
+            vulnerabilities.append({
+                'line': web_services['http_line'],
+                'matched_text': 'ip http server (no HTTPS)',
+                'details': {
+                    'vulnerability': 'http_server_only',
+                    'recommendation': 'Disable HTTP server or configure HTTPS instead',
+                    'security_risk': 'HTTP transmits credentials and data in plain text',
+                    'severity_adjusted': 'High'
+                }
+            })
+    
+    # HTTPS 서버 보안 설정 확인
+    if web_services['https_enabled']:
+        https_issues = []
+        
+        # HTTPS 인증서 확인
+        if not web_services['ssl_certificate']:
+            https_issues.append('no_ssl_certificate')
+        
+        # HTTP 접근 제한 확인
+        if not web_services['access_restricted']:
+            https_issues.append('no_access_restriction')
+        
+        # 약한 SSL/TLS 버전 확인
+        if web_services['weak_ssl_versions']:
+            https_issues.append('weak_ssl_versions')
+        
+        # HTTPS 이슈가 있는 경우에만 보고
+        if https_issues:
+            vulnerabilities.append({
+                'line': web_services['https_line'],
+                'matched_text': 'ip http secure-server (security issues)',
+                'details': {
+                    'vulnerability': 'https_configuration_weak',
+                    'https_issues': https_issues,
+                    'web_config': web_services,
+                    'recommendation': _generate_https_recommendations(https_issues),
+                    'severity_adjusted': 'Medium'
+                }
+            })
     
     return vulnerabilities
+
+
+def _analyze_web_services(context: ConfigContext) -> Dict[str, Any]:
+    """웹 서비스 설정 분석"""
+    web_config = {
+        'http_enabled': False,
+        'https_enabled': False,
+        'http_line': 0,
+        'https_line': 0,
+        'ssl_certificate': False,
+        'access_restricted': False,
+        'weak_ssl_versions': [],
+        'authentication_configured': False
+    }
+    
+    for i, line in enumerate(context.config_lines):
+        line_clean = line.strip().lower()
+        
+        # HTTP 서버 확인
+        if 'ip http server' in line_clean and not line_clean.startswith('no '):
+            web_config['http_enabled'] = True
+            web_config['http_line'] = i + 1
+        
+        # HTTPS 서버 확인
+        elif 'ip http secure-server' in line_clean and not line_clean.startswith('no '):
+            web_config['https_enabled'] = True
+            web_config['https_line'] = i + 1
+        
+        # SSL 인증서 확인
+        elif 'crypto pki certificate' in line_clean or 'ssl certificate' in line_clean:
+            web_config['ssl_certificate'] = True
+        
+        # 웹 접근 제한 확인
+        elif 'ip http access-class' in line_clean:
+            web_config['access_restricted'] = True
+        
+        # 웹 인증 설정 확인
+        elif 'ip http authentication' in line_clean:
+            web_config['authentication_configured'] = True
+        
+        # SSL/TLS 버전 확인
+        elif 'ssl version' in line_clean or 'tls version' in line_clean:
+            if any(weak_version in line_clean for weak_version in ['ssl 3.0', 'tls 1.0', 'tls 1.1']):
+                version_match = re.search(r'(ssl \d\.\d|tls \d\.\d)', line_clean)
+                if version_match:
+                    web_config['weak_ssl_versions'].append(version_match.group(1))
+    
+    return web_config
+
+
+def _generate_https_recommendations(https_issues: List[str]) -> str:
+    """HTTPS 권고사항 생성"""
+    recommendations = []
+    
+    if 'no_ssl_certificate' in https_issues:
+        recommendations.append("SSL 인증서 설정 (crypto pki)")
+    if 'no_access_restriction' in https_issues:
+        recommendations.append("웹 접근 제한 설정 (ip http access-class)")
+    if 'weak_ssl_versions' in https_issues:
+        recommendations.append("강력한 TLS 버전 사용 (TLS 1.2 이상)")
+    
+    return '; '.join(recommendations)
 
 
 def check_small_services_status(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
@@ -1438,62 +1715,52 @@ def check_cdp_service_status(line: str, line_num: int, context: ConfigContext) -
 
 
 def check_directed_broadcast_status(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """N-30: Directed-broadcast 차단 - 버전별 기본값 고려 개선"""
+    """N-30: Directed-broadcast 차단 - 버전별 기본값 정확한 반영"""
     vulnerabilities = []
     
-    # IOS 버전 확인
+    # IOS 버전 확인 및 기본값 판단
     ios_version = context.ios_version or "15.0"
     version_num = context.cisco_defaults._extract_version_number(ios_version)
     
-    # 15.x에서는 기본값이 disabled이므로 덜 엄격하게 적용
-    strict_check = version_num < 12.0  # 12.0 이전에서만 엄격하게 체크
+    # 버전별 기본 동작
+    default_enabled = version_num < 12.0  # 12.0 이전에서만 기본 enabled
     
     for interface_name, interface_config in context.parsed_interfaces.items():
-        # 서브인터페이스는 제외 (의미없음)
-        if interface_config.get('is_subinterface', False):
-            continue
-            
-        # 루프백, 관리 인터페이스 제외
-        if interface_config.get('is_loopback') or interface_config.get('is_management'):
+        # 서브인터페이스, 루프백, 관리 인터페이스 제외
+        if (interface_config.get('is_subinterface', False) or 
+            interface_config.get('is_loopback') or 
+            interface_config.get('is_management')):
             continue
             
         config_lines = interface_config.get('config_lines', [])
         
         # 명시적 설정 확인
-        directed_broadcast_explicitly_disabled = any('no ip directed-broadcast' in line for line in config_lines)
-        directed_broadcast_explicitly_enabled = any(
+        explicitly_disabled = any('no ip directed-broadcast' in line for line in config_lines)
+        explicitly_enabled = any(
             'ip directed-broadcast' in line and not line.strip().startswith('no ')
             for line in config_lines
         )
         
-        # 실제 상태 판단 (버전별 기본값 고려)
-        if directed_broadcast_explicitly_disabled:
-            actual_state = False
-        elif directed_broadcast_explicitly_enabled:
-            actual_state = True
-        else:
-            # 기본값 적용 (버전별)
-            actual_state = context.get_service_state('directed_broadcast')
-        
-        # 취약점 판단
-        is_vulnerable = False
-        severity = "Medium"
-        
-        if directed_broadcast_explicitly_enabled:
-            # 명시적으로 활성화된 경우는 항상 취약
-            is_vulnerable = True
+        # 실제 상태 판단
+        if explicitly_disabled:
+            actual_state = False  # 안전
+            continue  # 명시적으로 비활성화된 경우는 문제없음
+        elif explicitly_enabled:
+            actual_state = True   # 위험
+            status = "explicitly_enabled"
             severity = "High"
-        elif actual_state and strict_check:
-            # 구버전에서 기본값으로 활성화된 경우
-            is_vulnerable = True
-            severity = "Medium"
-        elif actual_state and not strict_check:
-            # 신버전에서는 정보성만 (실제로는 기본값이 disabled)
-            is_vulnerable = True
-            severity = "Low"
+        else:
+            # 명시적 설정이 없는 경우 기본값 적용
+            actual_state = default_enabled
+            if actual_state:
+                status = "default_enabled"
+                severity = "Medium" if version_num < 12.0 else "Low"
+            else:
+                continue  # 기본값이 disabled면 문제없음
         
-        if is_vulnerable:
-            status = "explicitly_enabled" if directed_broadcast_explicitly_enabled else "default_state"
+        # 취약점 보고 (actual_state가 True인 경우만)
+        if actual_state:
+            recommendation = 'Add: no ip directed-broadcast' if status == "default_enabled" else 'Change to: no ip directed-broadcast'
             
             vulnerabilities.append({
                 'line': interface_config['line_number'],
@@ -1503,11 +1770,10 @@ def check_directed_broadcast_status(line: str, line_num: int, context: ConfigCon
                     'interface_name': interface_name,
                     'status': status,
                     'ios_version': ios_version,
-                    'version_based_default': actual_state,
-                    'strict_check': strict_check,
-                    'recommendation': 'Add: no ip directed-broadcast' if status == "default_state"
-                                    else 'Change to: no ip directed-broadcast',
-                    'severity_adjusted': severity
+                    'version_default': default_enabled,
+                    'recommendation': recommendation,
+                    'severity_adjusted': severity,
+                    'version_info': f'IOS {ios_version}: default {"enabled" if default_enabled else "disabled"}'
                 }
             })
     
@@ -1553,7 +1819,6 @@ def check_source_routing_status(line: str, line_num: int, context: ConfigContext
         })
     
     return vulnerabilities
-
 
 
 def check_proxy_arp_status(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
@@ -1697,49 +1962,72 @@ def check_identd_service_status(line: str, line_num: int, context: ConfigContext
 
 
 def check_domain_lookup_status(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """N-35: Domain lookup 차단 - 오탐 수정된 버전"""
+    """N-35: Domain lookup 차단 - 명시적 설정 정확한 처리"""
     vulnerabilities = []
     
-    # 🔧 수정: 명시적 설정 우선 확인
-    domain_lookup_explicitly_disabled = any(
-        'no ip domain-lookup' in line or 'no ip domain lookup' in line 
-        for line in context.config_lines
-    )
+    # 명시적 설정 정확한 파싱
+    explicitly_disabled_lines = []
+    explicitly_enabled_lines = []
     
-    domain_lookup_explicitly_enabled = any(
-        ('ip domain-lookup' in line or 'ip domain lookup' in line) and 
-        not line.strip().startswith('no ')
-        for line in context.config_lines
-    )
-    
-    # 실제 상태 판단
-    if domain_lookup_explicitly_disabled:
-        actual_state = False  # 비활성화됨 (양호)
-    elif domain_lookup_explicitly_enabled:
-        actual_state = True   # 명시적 활성화됨 (취약)
-    else:
-        # 기본값 적용: Cisco는 기본적으로 domain-lookup enabled
-        actual_state = context.get_service_state('domain_lookup')
-    
-    # 보안 기준: domain-lookup은 비활성화되어야 함
-    if actual_state:  # 활성화된 경우만 취약점으로 보고
-        status = "explicitly_enabled" if domain_lookup_explicitly_enabled else "default_enabled"
+    for i, line in enumerate(context.config_lines):
+        line_clean = line.strip()
         
-        vulnerabilities.append({
-            'line': 0,
-            'matched_text': f'Domain lookup {status}',
-            'details': {
-                'vulnerability': 'domain_lookup_enabled',
-                'status': status,
-                'recommendation': 'Add: no ip domain-lookup' if status == "default_enabled" 
-                                else 'Keep: no ip domain-lookup setting',
-                'default_behavior': 'Cisco default: domain-lookup enabled',
-                'current_config_check': {
-                    'explicitly_disabled': domain_lookup_explicitly_disabled,
-                    'explicitly_enabled': domain_lookup_explicitly_enabled
+        # 비활성화 설정 확인 (다양한 형태)
+        if any(pattern in line_clean for pattern in ['no ip domain-lookup', 'no ip domain lookup']):
+            explicitly_disabled_lines.append(i + 1)
+        
+        # 활성화 설정 확인 (no로 시작하지 않는 경우만)
+        elif (any(pattern in line_clean for pattern in ['ip domain-lookup', 'ip domain lookup']) and
+              not line_clean.startswith('no ')):
+            explicitly_enabled_lines.append(i + 1)
+    
+    # 최종 설정 상태 판단 (마지막 설정이 우선)
+    all_settings = []
+    
+    for line_num in explicitly_disabled_lines:
+        all_settings.append((line_num, False))  # disabled
+    
+    for line_num in explicitly_enabled_lines:
+        all_settings.append((line_num, True))   # enabled
+    
+    # 라인 번호순으로 정렬하여 마지막 설정 확인
+    all_settings.sort(key=lambda x: x[0])
+    
+    if all_settings:
+        # 명시적 설정이 있는 경우
+        last_line, last_setting = all_settings[-1]
+        
+        if last_setting:  # 마지막이 enabled 설정인 경우만 취약점
+            vulnerabilities.append({
+                'line': last_line,
+                'matched_text': 'Domain lookup explicitly enabled',
+                'details': {
+                    'vulnerability': 'domain_lookup_enabled',
+                    'status': 'explicitly_enabled',
+                    'last_config_line': last_line,
+                    'all_settings': all_settings,
+                    'recommendation': 'Change to: no ip domain-lookup',
+                    'severity_adjusted': 'Medium'
                 }
-            }
-        })
+            })
+        # explicitly disabled인 경우는 안전하므로 보고하지 않음
+    else:
+        # 명시적 설정이 없는 경우 - 기본값 확인
+        default_enabled = context.get_service_state('domain_lookup')
+        
+        if default_enabled:
+            vulnerabilities.append({
+                'line': 0,
+                'matched_text': 'Domain lookup using default (enabled)',
+                'details': {
+                    'vulnerability': 'domain_lookup_default_enabled',
+                    'status': 'default_enabled',
+                    'ios_version': context.ios_version,
+                    'recommendation': 'Add: no ip domain-lookup',
+                    'severity_adjusted': 'Low',
+                    'note': 'Default behavior varies by IOS version'
+                }
+            })
     
     return vulnerabilities
 
@@ -1765,43 +2053,61 @@ def check_pad_service_status(line: str, line_num: int, context: ConfigContext) -
 
 
 def check_mask_reply_status(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """N-37: mask-reply 차단 - 기본값 고려 개선된 버전"""
+    """N-37: mask-reply 차단 - 버전별 기본값 정확한 처리"""
     vulnerabilities = []
     
+    # IOS 버전별 기본값 확인
+    ios_version = context.ios_version or "15.0"
+    version_num = context.cisco_defaults._extract_version_number(ios_version)
+    
+    # 버전별 기본 동작 (12.4 이후부터 기본 disabled)
+    default_enabled = version_num < 12.4
+    
     for interface_name, interface_config in context.parsed_interfaces.items():
-        # 서브인터페이스 제외
-        if interface_config.get('is_subinterface', False):
+        # 서브인터페이스, 루프백, 관리 인터페이스 제외
+        if (interface_config.get('is_subinterface', False) or 
+            interface_config.get('is_loopback') or 
+            interface_config.get('is_management')):
             continue
             
         # 물리 인터페이스만 체크
         if interface_config['port_type'] not in ['FastEthernet', 'GigabitEthernet', 'TenGigabitEthernet']:
             continue
             
-        # 루프백, 관리 인터페이스 제외
-        if interface_config.get('is_loopback') or interface_config.get('is_management'):
-            continue
-            
         config_lines = interface_config.get('config_lines', [])
         
         # 명시적 설정 확인
-        mask_reply_explicitly_disabled = any('no ip mask-reply' in line for line in config_lines)
-        mask_reply_explicitly_enabled = any(
+        explicitly_disabled = any('no ip mask-reply' in line for line in config_lines)
+        explicitly_enabled = any(
             'ip mask-reply' in line and not line.strip().startswith('no ')
             for line in config_lines
         )
         
-        # 실제 상태 판단 (버전별 기본값 고려)
-        if mask_reply_explicitly_disabled:
-            actual_state = False
-        elif mask_reply_explicitly_enabled:
-            actual_state = True
+        # 실제 상태 판단
+        if explicitly_disabled:
+            actual_state = False  # 안전
+            continue
+        elif explicitly_enabled:
+            actual_state = True   # 위험
+            status = "explicitly_enabled"
+            severity = "High"
         else:
-            # 기본값 적용 (버전별 차이 고려)
-            actual_state = context.get_service_state('mask_reply')
+            # 명시적 설정이 없는 경우 기본값 적용
+            actual_state = default_enabled
+            if actual_state:
+                status = "default_enabled"
+                # 구버전에서만 중간 위험도, 신버전에서는 실제로 기본값이 disabled
+                severity = "Medium" if version_num < 12.4 else "Info"
+            else:
+                continue  # 기본값이 disabled면 안전
         
-        # 보안 기준: mask-reply는 비활성화되어야 함
-        if actual_state:  # 활성화된 경우 취약
-            status = "explicitly_enabled" if mask_reply_explicitly_enabled else "default_enabled"
+        # 취약점 보고 (actual_state가 True인 경우만)
+        if actual_state:
+            # 신버전에서 기본값이 disabled인데 Info로 보고하는 것은 실제로는 문제가 없으므로 Skip
+            if status == "default_enabled" and version_num >= 12.4:
+                continue
+                
+            recommendation = 'Add: no ip mask-reply' if status == "default_enabled" else 'Change to: no ip mask-reply'
             
             vulnerabilities.append({
                 'line': interface_config['line_number'],
@@ -1810,10 +2116,11 @@ def check_mask_reply_status(line: str, line_num: int, context: ConfigContext) ->
                     'vulnerability': 'mask_reply_not_disabled',
                     'interface_name': interface_name,
                     'status': status,
-                    'ios_version': context.ios_version,
-                    'recommendation': 'Add: no ip mask-reply' if status == "default_enabled"
-                                    else 'Change to: no ip mask-reply',
-                    'default_behavior': f'IOS {context.ios_version}: mask-reply default {"enabled" if actual_state else "disabled"}'
+                    'ios_version': ios_version,
+                    'version_default': default_enabled,
+                    'recommendation': recommendation,
+                    'severity_adjusted': severity,
+                    'version_info': f'IOS {ios_version}: default {"enabled" if default_enabled else "disabled"} (changed in 12.4+)'
                 }
             })
     
