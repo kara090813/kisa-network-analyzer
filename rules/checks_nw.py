@@ -15,9 +15,7 @@ from .loader import (
     _is_private_ip,
     _analyze_routing_protocols,
     _parse_line_configs,
-    _extract_ios_version_number,
-    _check_aux_port_security,
-    _check_console_port_security                  
+    _extract_ios_version_number,              
 )
 
 
