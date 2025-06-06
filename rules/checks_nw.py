@@ -897,75 +897,72 @@ def check_nw_17(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
     if not context.snmp_communities:
         return vulnerabilities
     
-    # 🔧 수정: 네트워크 환경 분석
-    network_analysis = _analyze_network_environment(context)
-    is_internal_only = not network_analysis['has_external_connection']
-    
     for community_info in context.snmp_communities:
         issues = []
         severity = '하'  # 기본 심각도
         
-        # 1. 기본 커뮤니티 스트링 확인 (가장 위험)
+        # 1. 기본 커뮤니티 스트링 확인 (ACL 있어도 매우 위험)
         if community_info['is_default']:
             issues.append('default_community')
-            severity = '상'  # 기본 커뮤니티는 매우 위험
+            severity = '상'  # ACL과 상관없이 기본 커뮤니티는 매우 위험
         
-        # 2. 매우 짧은 길이 확인 (4자 미만은 매우 위험)
+        # 2. 매우 짧은 길이 확인 (4자 미만은 ACL 있어도 위험)
         elif community_info['length'] < 4:
             issues.append('very_short')
-            severity = '중'
+            severity = '중'  # ACL이 있어도 너무 짧으면 위험
         
-        # 🔧 수정: 내부 네트워크는 완화된 기준 적용
-        elif is_internal_only:
-            # 내부 전용 네트워크: 6자 이상 + ACL 있으면 충분
-            if community_info['length'] >= 6 and community_info.get('acl'):
-                continue  # 충분히 안전하므로 문제 없음
-            elif community_info['length'] < 6:
-                issues.append('short_internal_network')
+        # 3. ACL 효과성 검증 - 개선된 부분
+        acl_name = community_info.get('acl')
+        acl_effectiveness = 'none'
+        
+        if acl_name:
+            # ACL의 실제 효과성 분석
+            acl_effectiveness = _analyze_acl_effectiveness(context, acl_name)
+        
+        # 4. 짧은 길이 확인 (6자 미만, ACL 효과성에 따라 다르게 처리)
+        if 4 <= community_info['length'] < 6:
+            if acl_effectiveness in ['none', 'weak']:
+                issues.append('short_without_effective_acl')
+                severity = '중'
+            elif acl_effectiveness == 'moderate':
+                issues.append('short_with_moderate_acl')
                 severity = '하'
+            # strong ACL이 있으면 6자 미만도 허용
         
-        # 3. 외부 연결이 있는 경우 엄격한 기준
-        else:
-            # 짧은 길이 확인 (6자 미만, ACL 여부에 따라 다르게 처리)
-            if community_info['length'] < 6:
-                if not community_info.get('acl'):
-                    issues.append('short_without_acl')
-                    severity = '중'
-                else:
-                    issues.append('short_with_acl')
-                    severity = '하'
-            
-            # 매우 단순한 패턴 확인
-            community = community_info['community'].lower()
-            very_simple_patterns = [
-                'public', 'private', '123', '1234', '12345',
-                'admin', 'test', 'temp', 'cisco', 'router', 'switch',
-                'snmp', 'community'
-            ]
-            
-            if any(pattern == community or pattern in community for pattern in very_simple_patterns):
-                issues.append('predictable_pattern')
-                severity = '중' if community_info.get('acl') else '상'
+        # 5. 예측 가능한 패턴 확인
+        community = community_info['community'].lower()
+        predictable_patterns = [
+            'public', 'private', '123', '1234', '12345',
+            'admin', 'test', 'temp', 'cisco', 'router', 
+            'switch', 'snmp', 'community', 'read', 'write'
+        ]
+        
+        if any(pattern == community or pattern in community for pattern in predictable_patterns):
+            issues.append('predictable_pattern')
+            # ACL이 강력해도 예측 가능한 패턴은 중간 위험
+            severity = '중' if acl_effectiveness == 'strong' else '상'
+        
+        # 6. 복잡성 부족 (6자 이상이지만 단순한 패턴)
+        elif len(community) >= 6 and (community.isdigit() or community.isalpha()):
+            if acl_effectiveness in ['none', 'weak']:
+                issues.append('lacks_complexity_no_effective_acl')
+                severity = '하'
+            # 강력한 ACL이 있으면 단순한 패턴도 허용
+        
+        # 7. ACL이 없거나 약한 경우
+        if acl_effectiveness in ['none', 'weak'] and not issues:
+            issues.append('no_effective_access_control')
+            severity = '하'
         
         # 취약점이 발견된 경우만 보고
         if issues:
-            # 권고사항 생성
-            recommendations = []
-            
-            if 'default_community' in issues:
-                recommendations.append("기본 커뮤니티 스트링(public, private)을 사용하지 마세요")
-            if any(issue in issues for issue in ['very_short', 'short_without_acl', 'short_with_acl', 'short_internal_network']):
-                recommendations.append("커뮤니티 스트링은 최소 6자 이상으로 설정하세요")
-            if 'predictable_pattern' in issues:
-                recommendations.append("예측하기 어려운 복잡한 문자열을 사용하세요")
-            
-            # 심각도별 메시지 조정
-            if severity == '상':
-                main_message = f"SNMP 커뮤니티 '{community_info['community']}'에 심각한 보안 문제가 있습니다"
-            elif severity == '중':
-                main_message = f"SNMP 커뮤니티 '{community_info['community']}'의 보안을 강화해야 합니다"
-            else:
-                main_message = f"SNMP 커뮤니티 '{community_info['community']}'의 보안 권고사항이 있습니다"
+            # ACL 효과성 정보 포함
+            acl_info = {
+                'has_acl': bool(acl_name),
+                'acl_name': acl_name,
+                'acl_effectiveness': acl_effectiveness,
+                'acl_analysis': _get_acl_analysis_detail(context, acl_name) if acl_name else None
+            }
             
             vulnerabilities.append({
                 'line': community_info['line_number'],
@@ -975,18 +972,84 @@ def check_nw_17(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
                     'issues': issues,
                     'community_length': community_info['length'],
                     'is_default': community_info['is_default'],
-                    'has_acl': bool(community_info.get('acl')),
-                    'acl_name': community_info.get('acl'),
                     'permission': community_info.get('permission', 'RO'),
-                    'network_type': 'internal' if is_internal_only else 'external',
                     'severity_adjusted': severity,
                     'vulnerability': 'weak_snmp_community',
-                    'main_message': main_message,
-                    'recommendation': '. '.join(recommendations)
+                    'acl_info': acl_info,
+                    'recommendation': _generate_snmp_recommendation(issues, acl_effectiveness)
                 }
             })
     
     return vulnerabilities
+
+
+def _analyze_acl_effectiveness(context: ConfigContext, acl_name: str) -> str:
+    """ACL의 실제 효과성 분석"""
+    if not acl_name:
+        return 'none'
+    
+    # ACL 정의 찾기
+    acl_lines = []
+    for line in context.config_lines:
+        if f'access-list {acl_name}' in line or f'ip access-list {acl_name}' in line:
+            acl_lines.append(line.strip())
+    
+    if not acl_lines:
+        return 'weak'  # ACL이 참조되었지만 정의되지 않음
+    
+    # ACL 내용 분석
+    permit_any = False
+    has_specific_restrictions = False
+    
+    for line in acl_lines:
+        if 'permit' in line and 'any' in line:
+            permit_any = True
+        if 'permit' in line and any(pattern in line for pattern in ['host', '/24', '/25', '/26', '/27', '/28', '/29', '/30']):
+            has_specific_restrictions = True
+        if 'deny' in line:
+            has_specific_restrictions = True
+    
+    if permit_any and not has_specific_restrictions:
+        return 'weak'  # permit any만 있음
+    elif has_specific_restrictions:
+        return 'strong' if not permit_any else 'moderate'
+    else:
+        return 'moderate'
+
+
+def _get_acl_analysis_detail(context: ConfigContext, acl_name: str) -> Dict[str, Any]:
+    """ACL 상세 분석 정보"""
+    if not acl_name:
+        return None
+    
+    acl_lines = []
+    for line in context.config_lines:
+        if f'access-list {acl_name}' in line:
+            acl_lines.append(line.strip())
+    
+    return {
+        'acl_exists': len(acl_lines) > 0,
+        'rule_count': len(acl_lines),
+        'has_permit_any': any('permit' in line and 'any' in line for line in acl_lines),
+        'has_specific_permits': any('permit' in line and 'host' in line for line in acl_lines),
+        'has_deny_rules': any('deny' in line for line in acl_lines)
+    }
+
+
+def _generate_snmp_recommendation(issues: List[str], acl_effectiveness: str) -> str:
+    """SNMP 권고사항 생성"""
+    recommendations = []
+    
+    if 'default_community' in issues:
+        recommendations.append("기본 커뮤니티 스트링(public, private) 사용 금지")
+    if any('short' in issue for issue in issues):
+        recommendations.append("커뮤니티 스트링 길이를 8자 이상으로 설정")
+    if 'predictable_pattern' in issues:
+        recommendations.append("예측하기 어려운 복잡한 문자열 사용")
+    if 'no_effective_access_control' in issues or acl_effectiveness in ['none', 'weak']:
+        recommendations.append("ACL 설정을 확인하세요.")
+    
+    return '; '.join(recommendations)
 
 
 def check_nw_18(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:

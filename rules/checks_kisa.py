@@ -556,7 +556,7 @@ def _generate_snmp_recommendation(issues: List[str], acl_effectiveness: str) -> 
     if 'predictable_pattern' in issues:
         recommendations.append("예측하기 어려운 복잡한 문자열 사용")
     if 'no_effective_access_control' in issues or acl_effectiveness in ['none', 'weak']:
-        recommendations.append("효과적인 ACL 적용 (특정 IP/네트워크만 허용)")
+        recommendations.append("ACL 설정을 확인하세요.")
     
     return '; '.join(recommendations)
 
