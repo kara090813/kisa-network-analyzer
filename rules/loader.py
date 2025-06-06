@@ -3,7 +3,7 @@
 rules/loader.py
 보안 지침서별 룰셋 로더 (중앙화된 공통 구조 포함)
 
-다양한 보안 지침서(KISA, CIS, NW, NIST 등)의 룰셋을 로드하는 중앙 관리 모듈
+다양한 보안 지침서(KISA, CIS, 자체지침서서, NIST 등)의 룰셋을 로드하는 중앙 관리 모듈
 공통 클래스 및 파싱 함수들을 중앙화하여 의존성 문제 해결
 """
 
@@ -778,7 +778,7 @@ SUPPORTED_SOURCES = {
         "total_rules": 89,
         "categories": ["계정 관리", "접근 관리", "로그 관리"]
     },
-    "NW": {
+    "자체룰셋": {
         "name": "NW 네트워크 장비 보안 가이드",
         "description": "NW 네트워크 장비 보안 점검 가이드라인",
         "version": "2025",
@@ -802,7 +802,7 @@ def load_rules(source: str) -> Dict[str, SecurityRule]:
     지침서별 보안 룰셋 로드
     
     Args:
-        source: 지침서 이름 ("KISA", "CIS", "NW", "NIST" etc)
+        source: 지침서 이름 ("KISA", "CIS", "자체룰셋", "NIST" etc)
         
     Returns:
         Dict[str, SecurityRule]: 룰 ID를 키로 하는 보안 룰 딕셔너리
@@ -824,7 +824,7 @@ def load_rules(source: str) -> Dict[str, SecurityRule]:
     elif source == "CIS":
         from .cis_rules import CIS_RULES
         return CIS_RULES
-    elif source == "NW":
+    elif source == "자체룰셋":
         from .nw_rules import NW_RULES
         return NW_RULES
     elif source == "NIST":
