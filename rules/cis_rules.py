@@ -447,7 +447,7 @@ CIS_RULES = {
     severity="상",
     category=RuleCategory.ACCESS_MANAGEMENT,
     patterns=[
-        r"username\s+\w+\s+privilege\s+(?!1\s)[2-9]|1[0-5]"
+        r"username\s+\w+\s+privilege\s+(?:[2-9]|1[0-5])\s"  # 🔥 단순화된 패턴
     ],
     negative_patterns=[
         r"username\s+\w+\s+privilege\s+1\s"
@@ -624,9 +624,11 @@ CIS_RULES = {
     description="Specifies a message to be displayed when an EXEC process is created",
     severity="중",
     category=RuleCategory.ACCESS_MANAGEMENT,
-    patterns=[],
+    patterns=[
+        r"^(?!.*banner\s+exec).*$"  # 🔥 패턴 추가
+    ],
     negative_patterns=[
-        r"banner\s+exec\s+\S.*\S"
+        r"banner\s+exec\s+\S"
     ],
     device_types=["Cisco"],
     recommendation="Configure EXEC banner: banner exec c <banner-text> c",
@@ -640,9 +642,11 @@ CIS_RULES = {
     description="Configures login banner presented to users attempting to access device",
     severity="중",
     category=RuleCategory.ACCESS_MANAGEMENT,
-    patterns=[],
+    patterns=[
+        r"^(?!.*banner\s+login).*$"  # 🔥 패턴 추가
+    ],
     negative_patterns=[
-        r"banner\s+login\s+\S.*\S"
+        r"banner\s+login\s+\S"
     ],
     device_types=["Cisco"],
     recommendation="Configure login banner: banner login c <banner-text> c",
@@ -656,9 +660,11 @@ CIS_RULES = {
     description="Configures message of the day banner",
     severity="중",
     category=RuleCategory.ACCESS_MANAGEMENT,
-    patterns=[],
+    patterns=[
+        r"^(?!.*banner\s+motd).*$"  # 🔥 패턴 추가
+    ],
     negative_patterns=[
-        r"banner\s+motd\s+\S.*\S"
+        r"banner\s+motd\s+\S"
     ],
     device_types=["Cisco"],
     recommendation="Configure MOTD banner: banner motd c <banner-text> c",
@@ -1080,7 +1086,8 @@ CIS_RULES = {
         severity="중",
         category=RuleCategory.FUNCTION_MANAGEMENT,
         patterns=[
-            r"cdp\s+run"
+            r"^(?!.*no\s+cdp\s+run).*$",
+            r"cdp\s+run"  # 명시적 활성화도 취약
         ],
         negative_patterns=[
             r"no\s+cdp\s+run"
@@ -1167,7 +1174,7 @@ CIS_RULES = {
         severity="중",
         category=RuleCategory.FUNCTION_MANAGEMENT,
         patterns=[
-            r"ip\s+identd"
+            r"^ip\s+identd$"
         ],
         negative_patterns=[
             r"no\s+ip\s+identd"
@@ -1465,7 +1472,9 @@ CIS_RULES = {
     description="Configure NTP server IP address",
     severity="상",
     category=RuleCategory.FUNCTION_MANAGEMENT,
-    patterns=[],
+    patterns=[
+        r"^(?!.*ntp\s+server).*$"  # 🔥 패턴 추가
+    ],
     negative_patterns=[
         r"ntp\s+server\s+\d+\.\d+\.\d+\.\d+"
     ],
@@ -1483,7 +1492,9 @@ CIS_RULES = {
     description="Configure loopback interface",
     severity="중",
     category=RuleCategory.FUNCTION_MANAGEMENT,
-    patterns=[],
+    patterns=[
+        r"^(?!.*interface\s+loopback).*$"
+    ],
     negative_patterns=[
         r"interface\s+loopback\s*\d+"
     ],

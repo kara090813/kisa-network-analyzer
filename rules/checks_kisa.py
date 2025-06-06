@@ -520,7 +520,7 @@ def check_snmp_acl_configuration(line: str, line_num: int, context: ConfigContex
                         'vulnerability': 'acl_not_defined',
                         'acl_name': acl_name,
                         'permission': community_info['permission'],
-                        'recommendation': f'Define access-list {acl_name} or remove ACL reference',
+                        'recommendation': f'access-list {acl_name}의 설정을 확인해주세요',
                         'severity_adjusted': 'High'
                     }
                 })

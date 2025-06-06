@@ -1011,7 +1011,7 @@ def check_nw_18(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
                         'vulnerability': 'acl_not_defined',
                         'acl_name': acl_name,
                         'permission': community_info['permission'],
-                        'recommendation': f'Define access-list {acl_name} or remove ACL reference',
+                        'recommendation': f'access-list {acl_name}의 설정을 확인해주세요',
                         'severity_adjusted': 'High'
                     }
                 })

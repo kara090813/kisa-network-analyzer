@@ -5,7 +5,7 @@ CIS Cisco IOS 12 Benchmark v4.0.0 네트워크 장비 보안 점검 룰의 논�
 
 각 CIS 룰에 대한 logical_check_function들을 정의
 """
-
+import re
 from typing import List, Dict, Any
 from .loader import ConfigContext
 
@@ -296,24 +296,26 @@ def check_cis_1_1_11(line: str, line_num: int, context: ConfigContext) -> List[D
     return vulnerabilities
 
 def check_cis_1_2_1(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """CIS-1.2.1: Set 'privilege 1' for local users"""
+    """CIS-1.2.1: Set 'privilege 1' for local users (개선된 버전)"""
     vulnerabilities = []
     
+    # 🔥 개선: 사용자별 상세 체크
     for user in context.parsed_users:
-        if user.get('privilege_level', 1) > 1:
+        privilege_level = user.get('privilege_level', 1)
+        if privilege_level > 1:
             vulnerabilities.append({
                 'line': user['line_number'],
-                'matched_text': f"username {user['username']} privilege {user['privilege_level']}",
+                'matched_text': f"username {user['username']} privilege {privilege_level}",
                 'details': {
                     'username': user['username'],
-                    'current_privilege': user['privilege_level'],
+                    'current_privilege': privilege_level,
                     'vulnerability': 'excessive_privilege_level',
-                    'recommendation': 'Set privilege level to 1'
+                    'recommendation': f'사용자 {user["username"]}의 권한을 1로 설정: username {user["username"]} privilege 1',
+                    'impact': '높은 권한으로 인한 보안 위험'
                 }
             })
     
     return vulnerabilities
-
 
 def check_cis_1_2_4(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
     """CIS-1.2.4: Create 'access-list' for use with 'line vty'"""
@@ -365,17 +367,26 @@ def check_cis_1_2_5(line: str, line_num: int, context: ConfigContext) -> List[Di
 
 
 def check_cis_1_3_1(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """CIS-1.3.1: Set the 'banner-text' for 'banner exec'"""
+    """CIS-1.3.1: Set the 'banner-text' for 'banner exec' (개선된 버전)"""
     vulnerabilities = []
     
-    has_exec_banner = 'banner exec' in context.full_config
+    # 🔥 개선: 더 정확한 banner exec 체크
+    has_exec_banner = False
+    
+    for config_line in context.config_lines:
+        if config_line.strip().startswith('banner exec '):
+            has_exec_banner = True
+            break
+    
     if not has_exec_banner:
         vulnerabilities.append({
             'line': 0,
-            'matched_text': 'banner exec not configured',
+            'matched_text': 'banner exec 설정 누락',
             'details': {
                 'vulnerability': 'missing_exec_banner',
-                'recommendation': 'Configure EXEC banner: banner exec c <text> c'
+                'description': 'EXEC 배너가 설정되지 않음',
+                'recommendation': 'EXEC 배너 설정: banner exec c <적절한 경고 메시지> c',
+                'impact': '사용자에게 적절한 보안 경고 제공 불가'
             }
         })
     
@@ -383,17 +394,26 @@ def check_cis_1_3_1(line: str, line_num: int, context: ConfigContext) -> List[Di
 
 
 def check_cis_1_3_2(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """CIS-1.3.2: Set the 'banner-text' for 'banner login'"""
+    """CIS-1.3.2: Set the 'banner-text' for 'banner login' (개선된 버전)"""
     vulnerabilities = []
     
-    has_login_banner = 'banner login' in context.full_config
+    # 🔥 개선: 더 정확한 banner login 체크
+    has_login_banner = False
+    
+    for config_line in context.config_lines:
+        if config_line.strip().startswith('banner login '):
+            has_login_banner = True
+            break
+    
     if not has_login_banner:
         vulnerabilities.append({
             'line': 0,
-            'matched_text': 'banner login not configured',
+            'matched_text': 'banner login 설정 누락',
             'details': {
                 'vulnerability': 'missing_login_banner',
-                'recommendation': 'Configure login banner: banner login c <text> c'
+                'description': '로그인 배너가 설정되지 않음',
+                'recommendation': '로그인 배너 설정: banner login c <적절한 경고 메시지> c',
+                'impact': '로그인 시 법적 경고 메시지 제공 불가'
             }
         })
     
@@ -401,17 +421,26 @@ def check_cis_1_3_2(line: str, line_num: int, context: ConfigContext) -> List[Di
 
 
 def check_cis_1_3_3(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """CIS-1.3.3: Set the 'banner-text' for 'banner motd'"""
+    """CIS-1.3.3: Set the 'banner-text' for 'banner motd' (개선된 버전)"""
     vulnerabilities = []
     
-    has_motd_banner = 'banner motd' in context.full_config
+    # 🔥 개선: 더 정확한 banner motd 체크
+    has_motd_banner = False
+    
+    for config_line in context.config_lines:
+        if config_line.strip().startswith('banner motd '):
+            has_motd_banner = True
+            break
+    
     if not has_motd_banner:
         vulnerabilities.append({
             'line': 0,
-            'matched_text': 'banner motd not configured',
+            'matched_text': 'banner motd 설정 누락',
             'details': {
                 'vulnerability': 'missing_motd_banner',
-                'recommendation': 'Configure MOTD banner: banner motd c <text> c'
+                'description': 'MOTD 배너가 설정되지 않음',
+                'recommendation': 'MOTD 배너 설정: banner motd c <적절한 시스템 정보> c',
+                'impact': '사용자에게 시스템 상태 정보 제공 불가'
             }
         })
     
@@ -819,17 +848,68 @@ def check_cis_2_1_8(line: str, line_num: int, context: ConfigContext) -> List[Di
     return vulnerabilities
 
 def check_cis_2_2_2(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """CIS-2.2.2: Set 'buffer size' for 'logging buffered'"""
+    """CIS-2.2.2: Set 'buffer size' for 'logging buffered' (명령어 축약 고려)"""
     vulnerabilities = []
     
-    has_logging_buffered = 'logging buffered' in context.full_config
+    # 🔥 개선: Cisco 명령어 축약 형태 모두 고려
+    logging_buffered_patterns = [
+        r'^logging\s+buffered\s+(\d+)',      # logging buffered 12345
+        r'^logging\s+buffer\s+(\d+)',        # logging buffer 12345  
+        r'^log\s+buffered\s+(\d+)',          # log buffered 12345
+        r'^log\s+buffer\s+(\d+)',            # log buffer 12345
+        r'^logging\s+buffered$',             # logging buffered (기본값)
+        r'^logging\s+buffer$',               # logging buffer (기본값)
+        r'^log\s+buffered$',                 # log buffered (기본값)
+        r'^log\s+buffer$'                    # log buffer (기본값)
+    ]
+    
+    has_logging_buffered = False
+    buffered_size = None
+    matched_command = None
+    
+    for config_line in context.config_lines:
+        line_clean = config_line.strip()
+        
+        for pattern in logging_buffered_patterns:
+            match = re.search(pattern, line_clean, re.IGNORECASE)
+            if match:
+                has_logging_buffered = True
+                matched_command = line_clean
+                
+                # 크기가 지정된 경우 추출
+                if match.groups():
+                    try:
+                        buffered_size = int(match.group(1))
+                    except (ValueError, IndexError):
+                        pass
+                break
+        
+        if has_logging_buffered:
+            break
+    
     if not has_logging_buffered:
         vulnerabilities.append({
             'line': 0,
-            'matched_text': 'logging buffered not configured',
+            'matched_text': 'logging buffered 설정 누락',
             'details': {
                 'vulnerability': 'missing_logging_buffered',
-                'recommendation': 'Configure buffered logging: logging buffered 64000'
+                'description': '로컬 버퍼 로깅이 설정되지 않음',
+                'recommendation': '버퍼 로깅 설정: logging buffered 64000',
+                'impact': '로컬 로그 저장 불가',
+                'checked_patterns': ['logging buffered', 'logging buffer', 'log buffered', 'log buffer']
+            }
+        })
+    elif buffered_size is not None and buffered_size < 4096:
+        vulnerabilities.append({
+            'line': 0,
+            'matched_text': matched_command,
+            'details': {
+                'vulnerability': 'insufficient_logging_buffer_size',
+                'description': f'로깅 버퍼 크기가 너무 작음 ({buffered_size} bytes)',
+                'current_size': buffered_size,
+                'current_command': matched_command,
+                'recommendation': '적절한 크기로 버퍼 설정: logging buffered 64000',
+                'impact': '로그 손실 위험'
             }
         })
     
@@ -837,17 +917,40 @@ def check_cis_2_2_2(line: str, line_num: int, context: ConfigContext) -> List[Di
 
 
 def check_cis_2_2_4(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """CIS-2.2.4: Set IP address for 'logging host'"""
+    """CIS-2.2.4: Set IP address for 'logging host' (명령어 축약 고려)"""
     vulnerabilities = []
     
-    has_logging_host = 'logging host' in context.full_config
+    # 🔥 개선: logging host 명령어 축약 형태들
+    logging_host_patterns = [
+        r'logging\s+host\s+\d+\.\d+\.\d+\.\d+',    # logging host 192.168.1.1
+        r'logging\s+\d+\.\d+\.\d+\.\d+',           # logging 192.168.1.1
+        r'log\s+host\s+\d+\.\d+\.\d+\.\d+',        # log host 192.168.1.1  
+        r'log\s+\d+\.\d+\.\d+\.\d+'                # log 192.168.1.1
+    ]
+    
+    has_logging_host = False
+    
+    for config_line in context.config_lines:
+        line_clean = config_line.strip()
+        
+        for pattern in logging_host_patterns:
+            if re.search(pattern, line_clean, re.IGNORECASE):
+                has_logging_host = True
+                break
+        
+        if has_logging_host:
+            break
+    
     if not has_logging_host:
         vulnerabilities.append({
             'line': 0,
-            'matched_text': 'logging host not configured',
+            'matched_text': 'logging host 설정 누락',
             'details': {
                 'vulnerability': 'missing_syslog_server',
-                'recommendation': 'Configure syslog server: logging host <ip_address>'
+                'description': 'Syslog 서버가 설정되지 않음',
+                'recommendation': 'Syslog 서버 설정: logging host <ip_address>',
+                'impact': '중앙집중식 로그 관리 불가',
+                'checked_patterns': ['logging host', 'logging <ip>', 'log host', 'log <ip>']
             }
         })
     
@@ -913,51 +1016,185 @@ def check_cis_2_3_1_3(line: str, line_num: int, context: ConfigContext) -> List[
 
 
 def check_cis_2_3_2(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """CIS-2.3.2: Set 'ip address' for 'ntp server'"""
+    """CIS-2.3.2: Set 'ip address' for 'ntp server' (명령어 축약 고려)"""
     vulnerabilities = []
     
-    has_ntp_server = 'ntp server' in context.full_config
-    if not has_ntp_server:
+    # 🔥 개선: NTP 관련 명령어 축약 형태들
+    ntp_server_patterns = [
+        r'^ntp\s+server\s+\d+\.\d+\.\d+\.\d+',     # ntp server 192.168.1.1
+        r'^ntp\s+srv\s+\d+\.\d+\.\d+\.\d+',        # ntp srv 192.168.1.1 (극도 축약)
+        r'^ntp\s+\d+\.\d+\.\d+\.\d+'               # ntp 192.168.1.1 (일부 버전)
+    ]
+    
+    ntp_servers = []
+    
+    for i, config_line in enumerate(context.config_lines):
+        line_clean = config_line.strip()
+        
+        for pattern in ntp_server_patterns:
+            if re.search(pattern, line_clean, re.IGNORECASE):
+                ntp_servers.append({
+                    'line_number': i + 1,
+                    'config': line_clean
+                })
+                break
+    
+    if not ntp_servers:
         vulnerabilities.append({
             'line': 0,
-            'matched_text': 'ntp server not configured',
+            'matched_text': 'NTP 서버 설정 누락',
             'details': {
                 'vulnerability': 'missing_ntp_server',
-                'recommendation': 'Configure NTP server: ntp server <ip_address>'
+                'description': 'NTP 서버가 설정되지 않음',
+                'recommendation': 'NTP 서버 설정: ntp server <신뢰할 수 있는 NTP 서버 IP>',
+                'impact': '시간 동기화 불가로 인한 로그 분석 및 보안 문제',
+                'checked_patterns': ['ntp server', 'ntp srv', 'ntp <ip>']
             }
         })
     
     return vulnerabilities
 
 
+def _check_cisco_command_variations(config_lines: List[str], base_command: str, 
+                                   variations: List[str] = None) -> List[Dict[str, Any]]:
+    """
+    🔥 새로운 헬퍼 함수: Cisco 명령어 축약 형태들을 체크
+    
+    Args:
+        config_lines: 설정 라인들
+        base_command: 기본 명령어 (예: 'logging buffered')
+        variations: 추가 확인할 축약 형태들
+        
+    Returns:
+        매치된 명령어들의 정보
+    """
+    if variations is None:
+        # 일반적인 Cisco 축약 패턴들
+        command_parts = base_command.split()
+        variations = []
+        
+        # 각 단어의 축약 형태 생성
+        for i, part in enumerate(command_parts):
+            if len(part) >= 3:
+                # 최소 3글자 이상인 경우 축약 가능
+                for length in range(3, len(part)):
+                    short_form = part[:length]
+                    new_command = command_parts.copy()
+                    new_command[i] = short_form
+                    variations.append(' '.join(new_command))
+    
+    matches = []
+    all_patterns = [base_command] + variations
+    
+    for i, line in enumerate(config_lines):
+        line_clean = line.strip()
+        
+        for pattern in all_patterns:
+            if line_clean.startswith(pattern + ' ') or line_clean == pattern:
+                matches.append({
+                    'line_number': i + 1,
+                    'matched_command': line_clean,
+                    'pattern_used': pattern
+                })
+                break
+    
+    return matches
+
+
 def check_cis_2_4_1(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """CIS-2.4.1: Create a single 'interface loopback'"""
+    """CIS-2.4.1: Create a single 'interface loopback' (개선된 버전)"""
     vulnerabilities = []
     
-    loopback_interfaces = [name for name in context.parsed_interfaces.keys() 
-                          if 'loopback' in name.lower()]
+    # 🔥 개선: 루프백 인터페이스 정확한 체크
+    loopback_interfaces = []
+    
+    for interface_name, interface_config in context.parsed_interfaces.items():
+        if interface_config.get('is_loopback'):
+            loopback_interfaces.append(interface_name)
     
     if len(loopback_interfaces) == 0:
         vulnerabilities.append({
             'line': 0,
-            'matched_text': 'no loopback interface configured',
+            'matched_text': '루프백 인터페이스 설정 누락',
             'details': {
                 'vulnerability': 'missing_loopback_interface',
-                'recommendation': 'Create loopback interface: interface loopback 0'
+                'description': '루프백 인터페이스가 설정되지 않음',
+                'recommendation': '루프백 인터페이스 생성: interface loopback 0',
+                'impact': '안정적인 관리 인터페이스 부재'
             }
         })
     elif len(loopback_interfaces) > 1:
         vulnerabilities.append({
             'line': 0,
-            'matched_text': f'multiple loopback interfaces: {loopback_interfaces}',
+            'matched_text': f'다중 루프백 인터페이스: {", ".join(loopback_interfaces)}',
             'details': {
                 'vulnerability': 'multiple_loopback_interfaces',
                 'loopback_count': len(loopback_interfaces),
-                'recommendation': 'Use only one loopback interface'
+                'loopback_list': loopback_interfaces,
+                'recommendation': '하나의 루프백 인터페이스만 사용하세요',
+                'impact': '관리 복잡성 증가'
             }
         })
     
     return vulnerabilities
+
+
+def _parse_routing_section(context: ConfigContext, protocol: str) -> Dict[str, Any]:
+    """🔥 개선된 라우팅 프로토콜 섹션 파싱"""
+    routing_info = {
+        'configured': False,
+        'config_lines': [],
+        'start_line': 0,
+        'authentication_configured': False,
+        'auth_details': []
+    }
+    
+    in_routing_section = False
+    current_section_start = 0
+    
+    for i, line in enumerate(context.config_lines):
+        line_clean = line.strip()
+        
+        # 라우팅 프로토콜 섹션 시작
+        if line_clean.startswith(f'router {protocol}'):
+            in_routing_section = True
+            current_section_start = i + 1
+            routing_info['configured'] = True
+            routing_info['start_line'] = current_section_start
+            routing_info['config_lines'].append(line_clean)
+            continue
+        
+        # 라우팅 섹션 내부
+        if in_routing_section:
+            # 다른 섹션 시작하면 라우팅 섹션 종료
+            if (not line.startswith(' ') and 
+                line_clean and 
+                not line_clean.startswith('!') and
+                not line_clean.startswith(f'router {protocol}')):
+                in_routing_section = False
+                continue
+            
+            # 라우팅 섹션 내 설정 수집
+            if line.startswith(' ') and line_clean:
+                routing_info['config_lines'].append(line_clean)
+                
+                # 인증 관련 키워드 체크
+                auth_keywords = [
+                    'authentication', 'key-chain', 'message-digest', 
+                    'password', 'neighbor.*password'
+                ]
+                
+                for keyword in auth_keywords:
+                    if re.search(keyword, line_clean, re.IGNORECASE):
+                        routing_info['authentication_configured'] = True
+                        routing_info['auth_details'].append({
+                            'line': i + 1,
+                            'config': line_clean,
+                            'auth_type': keyword
+                        })
+                        break
+    
+    return routing_info
 
 
 def check_cis_2_4_2(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
@@ -1099,21 +1336,27 @@ def check_cis_3_2_2(line: str, line_num: int, context: ConfigContext) -> List[Di
 # ==================== 라우팅 프로토콜 인증 체크 함수들 ====================
 
 def check_cis_3_3_1_1(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """CIS-3.3.1.1: Set 'key chain' for EIGRP"""
+    """CIS-3.3.1.1: Set 'key chain' for EIGRP (개선된 버전)"""
     vulnerabilities = []
     
-    has_eigrp = 'router eigrp' in context.full_config
-    has_key_chain = 'key chain' in context.full_config
+    # 🔥 개선: EIGRP와 key chain 연관성 체크
+    eigrp_info = _parse_routing_section(context, 'eigrp')
     
-    if has_eigrp and not has_key_chain:
-        vulnerabilities.append({
-            'line': 0,
-            'matched_text': 'EIGRP configured without key chain',
-            'details': {
-                'vulnerability': 'missing_eigrp_key_chain',
-                'recommendation': 'Configure key chain for EIGRP authentication'
-            }
-        })
+    if eigrp_info['configured']:
+        # EIGRP가 설정되어 있으면 key chain 확인
+        has_key_chain = 'key chain' in context.full_config
+        
+        if not has_key_chain:
+            vulnerabilities.append({
+                'line': eigrp_info['start_line'],
+                'matched_text': 'EIGRP configured without key chain',
+                'details': {
+                    'vulnerability': 'missing_eigrp_key_chain',
+                    'description': 'EIGRP가 설정되어 있으나 key chain이 없음',
+                    'recommendation': 'EIGRP 인증을 위한 key chain 설정',
+                    'impact': 'EIGRP 라우팅 프로토콜 인증 부재'
+                }
+            })
     
     return vulnerabilities
 
@@ -1291,21 +1534,28 @@ def check_cis_3_3_1_9(line: str, line_num: int, context: ConfigContext) -> List[
 
 
 def check_cis_3_3_2_1(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """CIS-3.3.2.1: Set 'authentication message-digest' for OSPF area"""
+    """CIS-3.3.2.1: Set 'authentication message-digest' for OSPF area (개선된 버전)"""
     vulnerabilities = []
     
-    has_ospf = 'router ospf' in context.full_config
-    has_area_auth = 'area' in context.full_config and 'authentication message-digest' in context.full_config
+    # 🔥 개선: OSPF 섹션 정확한 파싱
+    ospf_info = _parse_routing_section(context, 'ospf')
     
-    if has_ospf and not has_area_auth:
-        vulnerabilities.append({
-            'line': 0,
-            'matched_text': 'OSPF configured without area authentication',
-            'details': {
-                'vulnerability': 'missing_ospf_area_authentication',
-                'recommendation': 'Configure area authentication: area <area> authentication message-digest'
-            }
-        })
+    if ospf_info['configured']:
+        # OSPF가 설정되어 있으면 area authentication 확인
+        has_area_auth = any('area' in line and 'authentication message-digest' in line 
+                           for line in ospf_info['config_lines'])
+        
+        if not has_area_auth:
+            vulnerabilities.append({
+                'line': ospf_info['start_line'],
+                'matched_text': 'OSPF configured without area authentication',
+                'details': {
+                    'vulnerability': 'missing_ospf_area_authentication',
+                    'description': 'OSPF가 설정되어 있으나 area 인증이 없음',
+                    'recommendation': 'OSPF area authentication 설정: area <area> authentication message-digest',
+                    'impact': 'OSPF 라우팅 프로토콜 인증 부재'
+                }
+            })
     
     return vulnerabilities
 
@@ -1449,20 +1699,27 @@ def check_cis_3_3_3_5(line: str, line_num: int, context: ConfigContext) -> List[
 
 
 def check_cis_3_3_4_1(line: str, line_num: int, context: ConfigContext) -> List[Dict[str, Any]]:
-    """CIS-3.3.4.1: Set 'neighbor password' for BGP"""
+    """CIS-3.3.4.1: Set 'neighbor password' for BGP (개선된 버전)"""
     vulnerabilities = []
     
-    has_bgp = 'router bgp' in context.full_config
-    has_neighbor_password = 'neighbor' in context.full_config and 'password' in context.full_config
+    # 🔥 개선: BGP 섹션 정확한 파싱
+    bgp_info = _parse_routing_section(context, 'bgp')
     
-    if has_bgp and not has_neighbor_password:
-        vulnerabilities.append({
-            'line': 0,
-            'matched_text': 'BGP configured without neighbor passwords',
-            'details': {
-                'vulnerability': 'missing_bgp_neighbor_passwords',
-                'recommendation': 'Configure BGP neighbor passwords: neighbor <ip> password <password>'
-            }
-        })
+    if bgp_info['configured']:
+        # BGP가 설정되어 있으면 neighbor password 확인
+        has_neighbor_password = any('neighbor' in line and 'password' in line 
+                                  for line in bgp_info['config_lines'])
+        
+        if not has_neighbor_password:
+            vulnerabilities.append({
+                'line': bgp_info['start_line'],
+                'matched_text': 'BGP configured without neighbor passwords',
+                'details': {
+                    'vulnerability': 'missing_bgp_neighbor_passwords',
+                    'description': 'BGP가 설정되어 있으나 neighbor 인증이 없음',
+                    'recommendation': 'BGP neighbor 인증 설정: neighbor <ip> password <password>',
+                    'impact': 'BGP 라우팅 프로토콜 인증 부재'
+                }
+            })
     
     return vulnerabilities
