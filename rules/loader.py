@@ -778,9 +778,9 @@ SUPPORTED_SOURCES = {
         "total_rules": 89,
         "categories": ["계정 관리", "접근 관리", "로그 관리"]
     },
-    "자체룰셋": {
+    "NW": {
         "name": "NW 네트워크 장비 보안 가이드",
-        "description": "NW 네트워크 장비 보안 점검 가이드라인",
+        "description": "자체 룰셋 네트워크 장비 보안 점검 가이드라인",
         "version": "2025",
         "total_rules": 42,
         "categories": ["계정 관리", "접근 관리", "패치 관리", "로그 관리", "기능 관리"]
@@ -824,7 +824,7 @@ def load_rules(source: str) -> Dict[str, SecurityRule]:
     elif source == "CIS":
         from .cis_rules import CIS_RULES
         return CIS_RULES
-    elif source == "자체룰셋":
+    elif source == "NW":
         from .nw_rules import NW_RULES
         return NW_RULES
     elif source == "NIST":
