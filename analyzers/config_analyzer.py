@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
 """
 analyzers/config_analyzer.py (개선된 버전)
-네트워크 장비 설정 파일 분석 엔진 - 상세 정보 보존 및 정확한 라인 번호 제공
+네트워크 장비 설정 파일 분석 엔진 - 상세 정보 보존 및 통과 항목 추적
 
 🔥 개선사항:
 - 개별 취약점의 상세 정보 보존
 - 정확한 라인 번호 제공
+- 통과된 룰들도 추적하여 반환
 - 통합 통계에서도 영향받는 항목들의 정보 유지
 """
 
@@ -33,6 +34,8 @@ from rules.cis_rules import CIS_RULES
 from models.analysis_request import AnalysisRequest
 from models.analysis_response import (
     VulnerabilityIssue, 
+    PassedRule,  # 🔥 새로 추가
+    SkippedRule,  # 🔥 새로 추가
     AnalysisResult, 
     AnalysisStatistics,
     calculate_consolidated_statistics,
@@ -165,7 +168,7 @@ def get_statistics(framework: str) -> Dict[str, Any]:
 
 
 class MultiFrameworkAnalyzer:
-    """🔥 개선된 다중 지침서 분석기 - 상세 정보 보존"""
+    """🔥 개선된 다중 지침서 분석기 - 상세 정보 보존 및 통과 항목 추적"""
     
     def __init__(self, default_framework: str = "KISA"):
         """
@@ -200,14 +203,15 @@ class MultiFrameworkAnalyzer:
                 self.logger.warning(f"❌ {framework} 지침서 로드 실패: {e}")
     
     def analyze_config(self, request: AnalysisRequest, framework: Optional[str] = None, 
-                      use_consolidation: bool = True) -> AnalysisResult:
+                      use_consolidation: bool = True, include_passed: bool = False) -> AnalysisResult:
         """
-        🔥 개선된 설정 파일 분석 - 상세 정보 보존 옵션 추가
+        🔥 개선된 설정 파일 분석 - 상세 정보 보존 및 통과 항목 추적 옵션 추가
         
         Args:
             request: 분석 요청 객체
             framework: 사용할 지침서 (None이면 기본값 사용)
             use_consolidation: 통합 통계 사용 여부
+            include_passed: 통과된 룰 정보 포함 여부 (🔥 새로운 옵션)
             
         Returns:
             AnalysisResult: 분석 결과
@@ -228,7 +232,8 @@ class MultiFrameworkAnalyzer:
             self.logger.info(f"분석 시작 - 지침서: {target_framework}, "
                            f"장비: {request.device_type}, "
                            f"전체 룰: {len(rules_dict)}개, "
-                           f"적용 룰: {len(device_rules)}개")
+                           f"적용 룰: {len(device_rules)}개, "
+                           f"통과 항목 포함: {include_passed}")
             
         except ValueError as e:
             self.logger.error(f"지원되지 않는 지침서: {target_framework}")
@@ -248,14 +253,19 @@ class MultiFrameworkAnalyzer:
             }
             self.logger.info(f"특정 룰 필터링 적용: {len(device_rules)}개 룰")
         
-        # 🔥 개선된 분석 실행
-        raw_vulnerabilities = self._perform_enhanced_analysis(
+        # 🔥 개선된 분석 실행 - 통과된 룰도 추적
+        analysis_results = self._perform_enhanced_analysis_with_passed(
             request.get_config_lines(), 
             device_rules, 
             config_context, 
             request.options,
-            target_framework
+            target_framework,
+            include_passed
         )
+        
+        raw_vulnerabilities = analysis_results['vulnerabilities']
+        passed_rules = analysis_results['passed_rules'] if include_passed else []
+        skipped_rules = analysis_results['skipped_rules'] if include_passed else []
         
         # 🔥 라인 번호 개선
         enhanced_vulnerabilities = []
@@ -274,6 +284,7 @@ class MultiFrameworkAnalyzer:
                 total_rules_checked=len(device_rules),
                 rules_passed=len(device_rules) - consolidated_stats['total_vulnerabilities'],
                 rules_failed=consolidated_stats['total_vulnerabilities'],
+                rules_skipped=len(skipped_rules),
                 high_severity_issues=consolidated_stats['high_severity'],
                 medium_severity_issues=consolidated_stats['medium_severity'],
                 low_severity_issues=consolidated_stats['low_severity'],
@@ -286,7 +297,7 @@ class MultiFrameworkAnalyzer:
         else:
             # 기존 방식으로 통계 생성
             final_vulnerabilities = enhanced_vulnerabilities
-            statistics = self._generate_legacy_statistics(final_vulnerabilities, device_rules)
+            statistics = self._generate_legacy_statistics(final_vulnerabilities, device_rules, len(skipped_rules))
         
         analysis_time = time.time() - start_time
         
@@ -296,30 +307,40 @@ class MultiFrameworkAnalyzer:
         
         self.logger.info(f"분석 완료 - 지침서: {target_framework}, "
                         f"최종 취약점: {len(final_vulnerabilities)}개, "
+                        f"통과된 룰: {len(passed_rules)}개, "
+                        f"건너뛴 룰: {len(skipped_rules)}개, "
                         f"분석시간: {analysis_time:.2f}초")
         
         return AnalysisResult(
             vulnerabilities=final_vulnerabilities,
+            passed_rules=passed_rules,
+            skipped_rules=skipped_rules,
             analysis_time=analysis_time,
             statistics=statistics
         )
     
-    def _perform_enhanced_analysis(
+    def _perform_enhanced_analysis_with_passed(
         self, 
         config_lines: List[str], 
         rules: Dict[str, SecurityRule],
         context: ConfigContext,
         options,
-        framework: str
-    ) -> List[VulnerabilityIssue]:
-        """🔥 개선된 분석 수행 - 상세 정보 보존"""
+        framework: str,
+        include_passed: bool = False
+    ) -> Dict[str, List]:
+        """🔥 개선된 분석 수행 - 상세 정보 보존 및 통과된 룰 추적"""
         vulnerabilities = []
+        passed_rules = []
+        skipped_rules = []
         
         logical_rules_used = 0
         pattern_rules_used = 0
         
         for rule_id, rule in rules.items():
             rule_vulnerabilities = []
+            rule_passed = False
+            rule_skipped = False
+            skip_reason = ""
             
             # 1. 논리 기반 분석 (우선순위)
             if rule.logical_check_function:
@@ -327,20 +348,30 @@ class MultiFrameworkAnalyzer:
                     logical_results = rule.logical_check_function("", 0, context)
                     logical_rules_used += 1
                     
-                    for result in logical_results:
-                        # 🔥 개선된 취약점 객체 생성
-                        issue = self._create_enhanced_vulnerability(
-                            rule, result, framework, 'logical', options
-                        )
-                        rule_vulnerabilities.append(issue)
+                    if logical_results:
+                        # 취약점 발견
+                        for result in logical_results:
+                            # 🔥 개선된 취약점 객체 생성
+                            issue = self._create_enhanced_vulnerability(
+                                rule, result, framework, 'logical', options
+                            )
+                            rule_vulnerabilities.append(issue)
+                    else:
+                        # 논리 분석에서 취약점 없음 = 통과
+                        rule_passed = True
                         
                 except Exception as e:
                     self.logger.error(f"논리 기반 분석 오류 ({rule_id}): {e}")
                     self.logger.debug(f"오류 상세: {str(e)}", exc_info=True)
+                    rule_skipped = True
+                    skip_reason = f"Analysis error: {str(e)}"
             
             # 2. 패턴 매칭 분석 (논리 분석이 없는 경우)
             elif rule.patterns:
                 pattern_rules_used += 1
+                
+                found_vulnerability = False
+                found_safe_pattern = False
                 
                 for line_num, line in enumerate(config_lines, 1):
                     if not line.strip() or line.strip().startswith('!'):
@@ -349,12 +380,14 @@ class MultiFrameworkAnalyzer:
                     # Negative 패턴 확인 (양호한 상태)
                     is_safe = any(neg_pattern.search(line) for neg_pattern in rule.compiled_negative_patterns)
                     if is_safe:
+                        found_safe_pattern = True
                         continue
                     
                     # 취약점 패턴 확인
                     for pattern in rule.compiled_patterns:
                         match = pattern.search(line)
                         if match:
+                            found_vulnerability = True
                             # 🔥 패턴 매칭 결과도 개선된 형태로 생성
                             pattern_result = {
                                 'line': line_num,
@@ -371,11 +404,87 @@ class MultiFrameworkAnalyzer:
                             )
                             rule_vulnerabilities.append(issue)
                             break
+                
+                # 패턴 분석 결과 판단
+                if not found_vulnerability:
+                    if found_safe_pattern:
+                        rule_passed = True
+                    else:
+                        # 패턴을 찾지 못함 - 설정이 없는 경우로 판단
+                        # 룰의 특성에 따라 이것이 취약점인지 양호한 상태인지 결정
+                        if self._is_rule_pass_when_no_config(rule_id):
+                            rule_passed = True
+                        else:
+                            # 기본값이 취약한 경우 - 설정이 없으면 취약점
+                            default_vuln_result = {
+                                'line': 0,
+                                'matched_text': 'Configuration not found (default may be vulnerable)',
+                                'details': {
+                                    'analysis_type': 'default_check',
+                                    'issue': 'missing_configuration'
+                                }
+                            }
+                            issue = self._create_enhanced_vulnerability(
+                                rule, default_vuln_result, framework, 'default', options
+                            )
+                            rule_vulnerabilities.append(issue)
+            else:
+                # 패턴도 논리 함수도 없는 룰
+                rule_skipped = True
+                skip_reason = "No analysis method defined"
             
-            vulnerabilities.extend(rule_vulnerabilities)
+            # 결과 분류
+            if rule_vulnerabilities:
+                vulnerabilities.extend(rule_vulnerabilities)
+            elif rule_passed and include_passed:
+                # 🔥 통과된 룰 정보 생성
+                passed_rule = PassedRule(
+                    rule_id=rule.rule_id,
+                    title=rule.title,
+                    description=rule.description,
+                    severity=rule.severity,
+                    category=rule.category.value,
+                    reference=rule.reference,
+                    reason="Configuration compliant",
+                    analysis_details={
+                        'analysis_type': 'logical' if rule.logical_check_function else 'pattern',
+                        'framework': framework,
+                        'check_passed': True
+                    }
+                )
+                passed_rules.append(passed_rule)
+            elif rule_skipped and include_passed:
+                # 🔥 건너뛴 룰 정보 생성
+                skipped_rule = SkippedRule(
+                    rule_id=rule.rule_id,
+                    title=rule.title,
+                    description=rule.description,
+                    severity=rule.severity,
+                    category=rule.category.value,
+                    reference=rule.reference,
+                    reason=skip_reason
+                )
+                skipped_rules.append(skipped_rule)
         
-        self.logger.info(f"분석 상세 - 논리 룰: {logical_rules_used}개, 패턴 룰: {pattern_rules_used}개")
-        return vulnerabilities
+        self.logger.info(f"분석 상세 - 논리 룰: {logical_rules_used}개, 패턴 룰: {pattern_rules_used}개, "
+                        f"통과: {len(passed_rules)}개, 건너뜀: {len(skipped_rules)}개")
+        
+        return {
+            'vulnerabilities': vulnerabilities,
+            'passed_rules': passed_rules,
+            'skipped_rules': skipped_rules
+        }
+    
+    def _is_rule_pass_when_no_config(self, rule_id: str) -> bool:
+        """룰별로 설정이 없을 때 통과로 처리할지 결정"""
+        # 서비스 비활성화 관련 룰들 - 설정이 없으면 기본값으로 비활성화되므로 통과
+        pass_when_no_config_rules = [
+            'N-11', 'N-25', 'N-26', 'N-27', 'N-28', 'N-29', 'N-34', 'N-35', 'N-36',  # KISA
+            'NW-20', 'NW-25', 'NW-26', 'NW-27', 'NW-28', 'NW-29', 'NW-34', 'NW-35', 'NW-36',  # NW
+            'CIS-2.1.3', 'CIS-2.1.4', 'CIS-2.1.5', 'CIS-2.1.8'  # CIS
+        ]
+        
+        return rule_id in pass_when_no_config_rules
     
     def _create_enhanced_vulnerability(self, rule: SecurityRule, result: Dict[str, Any], 
                                      framework: str, analysis_type: str, options) -> VulnerabilityIssue:
@@ -460,7 +569,8 @@ class MultiFrameworkAnalyzer:
     def _generate_legacy_statistics(
         self, 
         vulnerabilities: List[VulnerabilityIssue], 
-        rules: Dict[str, SecurityRule]
+        rules: Dict[str, SecurityRule],
+        skipped_count: int = 0
     ) -> AnalysisStatistics:
         """기존 방식의 분석 통계 생성"""
         severity_counts = {"상": 0, "중": 0, "하": 0}
@@ -471,12 +581,13 @@ class MultiFrameworkAnalyzer:
         
         failed_rule_ids = set(vuln.rule_id for vuln in vulnerabilities)
         rules_failed = len(failed_rule_ids)
-        rules_passed = len(rules) - rules_failed
+        rules_passed = len(rules) - rules_failed - skipped_count
         
         return AnalysisStatistics(
             total_rules_checked=len(rules),
-            rules_passed=rules_passed,
+            rules_passed=max(0, rules_passed),  # 음수 방지
             rules_failed=rules_failed,
+            rules_skipped=skipped_count,
             high_severity_issues=severity_counts["상"],
             medium_severity_issues=severity_counts["중"],
             low_severity_issues=severity_counts["하"]

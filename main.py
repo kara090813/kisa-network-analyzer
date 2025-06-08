@@ -10,6 +10,7 @@ main.py - Flask 애플리케이션 메인 파일
 - 통합 통계 옵션 제공
 - 개별 취약점과 통합 취약점 선택 가능
 - IOS 버전 정보를 장비 타입에 포함
+- 🔥 통과된 룰 정보도 볼 수 있는 옵션 추가
 """
 
 import os
@@ -48,8 +49,8 @@ logger = setup_logger(__name__)
 analyzer = MultiFrameworkAnalyzer()
 
 # API 버전 정보
-API_VERSION = "1.4.0"  # 상세 정보 보존 기능으로 버전 업데이트
-ANALYSIS_ENGINE_VERSION = "Enhanced Multi-Framework 1.1"
+API_VERSION = "1.5.0"  # 🔥 통과 항목 추적 기능으로 버전 업데이트
+ANALYSIS_ENGINE_VERSION = "Enhanced Multi-Framework with Passed Rules 1.2"
 
 
 @app.route('/api/v1/health', methods=['GET'])
@@ -74,17 +75,19 @@ def health_check():
             "version": API_VERSION,
             "engineVersion": ANALYSIS_ENGINE_VERSION,
             "timestamp": datetime.now().isoformat(),
-            "service": "KISA Network Security Config Analyzer (Enhanced Multi-Framework)",
+            "service": "KISA Network Security Config Analyzer (Enhanced Multi-Framework with Passed Rules)",
             "features": {
                 "logicalAnalysis": True,
                 "patternMatching": True,
                 "multiFrameworkSupport": True,
                 "frameworkComparison": True,
                 "contextualParsing": True,
-                "detailedReporting": True,  # 🔥 새로운 기능
-                "accurateLineNumbers": True,  # 🔥 새로운 기능
-                "consolidatedStatistics": True,  # 🔥 새로운 기능
-                "iosVersionDetection": True  # 🔥 새로운 기능
+                "detailedReporting": True,
+                "accurateLineNumbers": True,
+                "consolidatedStatistics": True,
+                "iosVersionDetection": True,
+                "passedRulesTracking": True,  # 🔥 새로운 기능
+                "complianceReporting": True   # 🔥 새로운 기능
             },
             "supportedFrameworks": list(supported_sources.keys()),
             "implementedFrameworks": implemented_frameworks,
@@ -160,8 +163,10 @@ def analyze_config():
             "returnRawMatches": false,
             "enableLogicalAnalysis": true,
             "includeRecommendations": true,
-            "useConsolidation": true,  // 🔥 새로운 옵션: 통합 통계 사용 여부
-            "showDetailedInfo": true   // 🔥 새로운 옵션: 상세 정보 표시 여부
+            "useConsolidation": true,     // 통합 통계 사용 여부
+            "showDetailedInfo": true,     // 상세 정보 표시 여부
+            "includePassedRules": false,  // 🔥 새로운 옵션: 통과된 룰 포함 여부
+            "includeSkippedRules": false  // 🔥 새로운 옵션: 건너뛴 룰 포함 여부
         }
     }
     """
@@ -177,8 +182,11 @@ def analyze_config():
         framework = request.json.get('framework', 'KISA').upper()
         
         # 🔥 새로운 옵션들 처리
-        use_consolidation = request.json.get('options', {}).get('useConsolidation', True)
-        show_detailed_info = request.json.get('options', {}).get('showDetailedInfo', True)
+        options = request.json.get('options', {})
+        use_consolidation = options.get('useConsolidation', True)
+        show_detailed_info = options.get('showDetailedInfo', True)
+        include_passed_rules = options.get('includePassedRules', False)  # 🔥 새로운 옵션
+        include_skipped_rules = options.get('includeSkippedRules', False)  # 🔥 새로운 옵션
         
         # 지침서 유효성 검증
         try:
@@ -223,13 +231,15 @@ def analyze_config():
         logger.info(f"분석 요청 수신 - 지침서: {framework}, "
                    f"장비 타입: {analysis_request.device_type}, "
                    f"설정 라인 수: {config_lines_count}, "
-                   f"통합 통계: {use_consolidation}")
+                   f"통합 통계: {use_consolidation}, "
+                   f"통과 항목 포함: {include_passed_rules}")
         
-        # 🔥 개선된 분석 수행
+        # 🔥 개선된 분석 수행 - 통과 항목 추적 옵션 추가
         analysis_result = analyzer.analyze_config(
             analysis_request, 
             framework=framework,
-            use_consolidation=use_consolidation
+            use_consolidation=use_consolidation,
+            include_passed=include_passed_rules or include_skipped_rules  # 둘 중 하나라도 True이면 추적
         )
         
         # 컨텍스트 정보 추가 (IOS 버전 정보 포함)
@@ -241,24 +251,31 @@ def analyze_config():
             context_info.get('iosVersion')
         )
         
-        # 🔥 개선된 응답 생성
+        # 🔥 개선된 응답 생성 - 통과/건너뛴 룰 포함
         response = AnalysisResponse(
-            device_type=device_type_with_version,  # IOS 버전 포함된 장비 타입
+            device_type=device_type_with_version,
             total_lines=config_lines_count,
             issues_found=len(analysis_result.vulnerabilities),
             analysis_time=analysis_result.analysis_time,
             results=analysis_result.vulnerabilities,
+            passed_rules=analysis_result.passed_rules if include_passed_rules else [],
+            skipped_rules=analysis_result.skipped_rules if include_skipped_rules else [],
             statistics=analysis_result.statistics
         )
         
-        # 응답 딕셔너리 생성 및 상세 정보 추가
-        response_dict = response.to_dict()
+        # 🔥 응답 딕셔너리 생성 - 통과/건너뛴 항목 포함 옵션
+        response_dict = response.to_dict(
+            include_passed=include_passed_rules,
+            include_skipped=include_skipped_rules
+        )
+        
+        # 추가 메타데이터
         response_dict.update({
             "framework": framework,
             "frameworkInfo": get_source_info(framework),
             "engineVersion": ANALYSIS_ENGINE_VERSION,
             "contextInfo": context_info,
-            "deviceInfo": {  # 🔥 새로운 장비 정보 섹션
+            "deviceInfo": {
                 "originalDeviceType": analysis_request.device_type,
                 "deviceTypeWithVersion": device_type_with_version,
                 "iosVersion": context_info.get('iosVersion'),
@@ -267,6 +284,8 @@ def analyze_config():
             "analysisOptions": {
                 "useConsolidation": use_consolidation,
                 "showDetailedInfo": show_detailed_info,
+                "includePassedRules": include_passed_rules,  # 🔥 새로운 정보
+                "includeSkippedRules": include_skipped_rules,  # 🔥 새로운 정보
                 "framework": framework
             },
             "validationWarnings": validation_result.warnings if hasattr(validation_result, 'warnings') else [],
@@ -275,6 +294,8 @@ def analyze_config():
                 "consolidationUsed": use_consolidation,
                 "individualFindings": getattr(analysis_result.statistics, 'total_individual_findings', None),
                 "consolidatedRules": getattr(analysis_result.statistics, 'consolidated_rules', None),
+                "passedRulesCount": len(analysis_result.passed_rules),  # 🔥 새로운 정보
+                "skippedRulesCount": len(analysis_result.skipped_rules),  # 🔥 새로운 정보
                 "logicalRulesUsed": sum(1 for v in analysis_result.vulnerabilities 
                                       if v.analysis_details and v.analysis_details.get('analysis_type') == 'logical'),
                 "patternRulesUsed": sum(1 for v in analysis_result.vulnerabilities 
@@ -288,11 +309,17 @@ def analyze_config():
             detailed_summary = _generate_detailed_summary(analysis_result.vulnerabilities)
             response_dict["detailedSummary"] = detailed_summary
         
+        # 🔥 컴플라이언스 요약 추가
+        if include_passed_rules or include_skipped_rules:
+            compliance_summary = _generate_compliance_summary(analysis_result)
+            response_dict["complianceSummary"] = compliance_summary
+        
         logger.info(f"분석 완료 - 지침서: {framework}, "
-                   f"장비: {device_type_with_version}, "  # 🔥 IOS 버전 포함된 장비 타입 표시
+                   f"장비: {device_type_with_version}, "
                    f"발견된 취약점: {response.issues_found}개, "
-                   f"분석 시간: {analysis_result.analysis_time:.2f}초, "
-                   f"통합 통계: {use_consolidation}")
+                   f"통과된 룰: {len(analysis_result.passed_rules)}개, "
+                   f"건너뛴 룰: {len(analysis_result.skipped_rules)}개, "
+                   f"분석 시간: {analysis_result.analysis_time:.2f}초")
         
         return jsonify(response_dict)
     
@@ -358,6 +385,35 @@ def analyze_config_summary():
         return jsonify({
             "success": False,
             "error": "요약 분석 실패",
+            "details": str(e)
+        }), 500
+
+
+@app.route('/api/v1/config-analyze/compliance', methods=['POST'])
+def analyze_config_compliance():
+    """
+    🔥 새로운 엔드포인트: 컴플라이언스 분석 (통과/실패/건너뛴 모든 항목 포함)
+    """
+    try:
+        # 모든 옵션을 활성화한 분석 수행
+        original_request = request.json.copy()
+        if 'options' not in original_request:
+            original_request['options'] = {}
+        original_request['options']['includePassedRules'] = True
+        original_request['options']['includeSkippedRules'] = True
+        original_request['options']['useConsolidation'] = True
+        original_request['options']['showDetailedInfo'] = True
+        
+        # 임시로 request.json 수정
+        request.json = original_request
+        
+        return analyze_config()
+    
+    except Exception as e:
+        logger.error(f"컴플라이언스 분석 중 오류 발생: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": "컴플라이언스 분석 실패",
             "details": str(e)
         }), 500
 
@@ -470,7 +526,8 @@ def get_supported_device_types():
                         "contextParsing": device_type in ["Cisco", "Juniper"],
                         "interfaceAnalysis": device_type in ["Cisco", "Juniper", "Piolink"],
                         "serviceAnalysis": True,
-                        "iosVersionDetection": device_type == "Cisco"  # 🔥 새로운 기능
+                        "iosVersionDetection": device_type == "Cisco",
+                        "passedRulesTracking": True  # 🔥 새로운 기능
                     }
                 }
         except:
@@ -551,7 +608,7 @@ def _extract_context_info(config_text: str, device_type: str) -> Dict[str, Any]:
             "configuredServices": len(context.parsed_services),
             "globalSettings": len(context.global_settings),
             "deviceType": device_type,
-            "iosVersion": ios_version,  # 🔥 IOS 버전 정보 추가
+            "iosVersion": ios_version,
             "configComplexity": _calculate_config_complexity(context),
             "hasVtyLines": len(context.vty_lines) > 0,
             "hasSnmpCommunities": len(context.snmp_communities) > 0,
@@ -586,7 +643,7 @@ def _calculate_config_complexity(context) -> str:
 
 
 def _extract_ios_version_from_config(config_text: str) -> Optional[str]:
-    """🔥 설정 파일에서 직접 IOS 버전 추출"""
+    """설정 파일에서 직접 IOS 버전 추출"""
     lines = config_text.splitlines()
     
     for line in lines:
@@ -621,7 +678,7 @@ def _extract_ios_version_from_config(config_text: str) -> Optional[str]:
 
 
 def _get_device_type_with_version(device_type: str, ios_version: Optional[str]) -> str:
-    """🔥 장비 타입에 IOS 버전 정보 추가"""
+    """장비 타입에 IOS 버전 정보 추가"""
     if ios_version and device_type.upper() == "CISCO":
         # 버전 정보가 너무 길면 간소화
         simplified_version = _simplify_ios_version(ios_version)
@@ -631,7 +688,7 @@ def _get_device_type_with_version(device_type: str, ios_version: Optional[str]) 
 
 
 def _simplify_ios_version(ios_version: str) -> str:
-    """🔥 IOS 버전을 간소화하여 표시"""
+    """IOS 버전을 간소화하여 표시"""
     # 15.1(4)M5 -> 15.1
     # 12.4(15)T7 -> 12.4
     # 16.09.04 -> 16.09
@@ -645,7 +702,7 @@ def _simplify_ios_version(ios_version: str) -> str:
 
 
 def _generate_detailed_summary(vulnerabilities: List) -> Dict[str, Any]:
-    """🔥 상세 요약 정보 생성"""
+    """상세 요약 정보 생성"""
     
     # 인터페이스별 문제 집계
     interface_issues = {}
@@ -716,6 +773,98 @@ def _generate_detailed_summary(vulnerabilities: List) -> Dict[str, Any]:
     }
 
 
+def _generate_compliance_summary(analysis_result) -> Dict[str, Any]:
+    """🔥 새로운 함수: 컴플라이언스 요약 생성"""
+    total_rules = (len(analysis_result.vulnerabilities) + 
+                   len(analysis_result.passed_rules) + 
+                   len(analysis_result.skipped_rules))
+    
+    if total_rules == 0:
+        return {
+            "complianceRate": 0,
+            "summary": "No rules analyzed"
+        }
+    
+    compliance_rate = (len(analysis_result.passed_rules) / total_rules) * 100
+    
+    # 심각도별 통과/실패 분류
+    severity_breakdown = {
+        "상": {"passed": 0, "failed": 0, "skipped": 0},
+        "중": {"passed": 0, "failed": 0, "skipped": 0},
+        "하": {"passed": 0, "failed": 0, "skipped": 0}
+    }
+    
+    # 실패한 룰 집계
+    for vuln in analysis_result.vulnerabilities:
+        if vuln.severity in severity_breakdown:
+            severity_breakdown[vuln.severity]["failed"] += 1
+    
+    # 통과한 룰 집계
+    for rule in analysis_result.passed_rules:
+        if rule.severity in severity_breakdown:
+            severity_breakdown[rule.severity]["passed"] += 1
+    
+    # 건너뛴 룰 집계
+    for rule in analysis_result.skipped_rules:
+        if rule.severity in severity_breakdown:
+            severity_breakdown[rule.severity]["skipped"] += 1
+    
+    # 카테고리별 분류
+    category_breakdown = {}
+    
+    # 모든 룰의 카테고리 수집
+    all_categories = set()
+    for vuln in analysis_result.vulnerabilities:
+        if vuln.category:
+            all_categories.add(vuln.category)
+    for rule in analysis_result.passed_rules:
+        all_categories.add(rule.category)
+    for rule in analysis_result.skipped_rules:
+        all_categories.add(rule.category)
+    
+    # 카테고리별 초기화
+    for category in all_categories:
+        category_breakdown[category] = {"passed": 0, "failed": 0, "skipped": 0}
+    
+    # 카테고리별 집계
+    for vuln in analysis_result.vulnerabilities:
+        if vuln.category and vuln.category in category_breakdown:
+            category_breakdown[vuln.category]["failed"] += 1
+    
+    for rule in analysis_result.passed_rules:
+        if rule.category in category_breakdown:
+            category_breakdown[rule.category]["passed"] += 1
+    
+    for rule in analysis_result.skipped_rules:
+        if rule.category in category_breakdown:
+            category_breakdown[rule.category]["skipped"] += 1
+    
+    return {
+        "complianceRate": round(compliance_rate, 2),
+        "totalRules": total_rules,
+        "passedRules": len(analysis_result.passed_rules),
+        "failedRules": len(analysis_result.vulnerabilities),
+        "skippedRules": len(analysis_result.skipped_rules),
+        "severityBreakdown": severity_breakdown,
+        "categoryBreakdown": category_breakdown,
+        "summary": _get_compliance_summary_text(compliance_rate)
+    }
+
+
+def _get_compliance_summary_text(compliance_rate: float) -> str:
+    """컴플라이언스 비율에 따른 요약 텍스트 생성"""
+    if compliance_rate >= 90:
+        return "Excellent compliance - Most security controls are properly configured"
+    elif compliance_rate >= 75:
+        return "Good compliance - Minor security issues need attention"
+    elif compliance_rate >= 50:
+        return "Fair compliance - Several security issues require remediation"
+    elif compliance_rate >= 25:
+        return "Poor compliance - Significant security vulnerabilities found"
+    else:
+        return "Critical compliance issues - Immediate security attention required"
+
+
 @app.errorhandler(404)
 def not_found(error):
     """404 에러 핸들러"""
@@ -746,7 +895,7 @@ if __name__ == '__main__':
     # 시작 로그
     logger.info(f"KISA 네트워크 보안 분석 API 시작 - Enhanced Multi-Framework Version {API_VERSION}")
     logger.info(f"분석 엔진: {ANALYSIS_ENGINE_VERSION}")
-    logger.info(f"새로운 기능: 상세 정보 보존, 정확한 라인 번호, 통합 통계 옵션, IOS 버전 표시")
+    logger.info(f"새로운 기능: 상세 정보 보존, 정확한 라인 번호, 통합 통계 옵션, IOS 버전 표시, 통과 항목 추적")
     
     try:
         # 지원 지침서 확인
@@ -764,7 +913,11 @@ if __name__ == '__main__':
                 logger.warning(f"❌ {fw} 지침서 로드 실패: {e}")
         
         logger.info(f"구현된 지침서: {', '.join(implemented)}")
-        logger.info(f"추가 엔드포인트: /api/v1/config-analyze/detailed, /api/v1/config-analyze/summary")
+        logger.info(f"API 엔드포인트:")
+        logger.info(f"  • /api/v1/config-analyze - 기본 분석 (옵션으로 통과 항목 포함)")
+        logger.info(f"  • /api/v1/config-analyze/detailed - 상세 분석")
+        logger.info(f"  • /api/v1/config-analyze/summary - 요약 분석")
+        logger.info(f"  • /api/v1/config-analyze/compliance - 컴플라이언스 분석 (모든 항목 포함)")
         
     except Exception as e:
         logger.error(f"지침서 초기화 중 오류: {e}")

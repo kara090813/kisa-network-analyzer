@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 models/analysis_response.py (개선된 버전)
-분석 응답 데이터 모델 - 상세 정보 보존 및 정확한 라인 번호 제공
+분석 응답 데이터 모델 - 상세 정보 보존 및 통과 항목 포함
 
 KISA 네트워크 장비 취약점 분석 결과를 위한 데이터 구조 정의
 """
@@ -17,6 +17,14 @@ class Severity(Enum):
     HIGH = "상"      # 상급
     MEDIUM = "중"    # 중급
     LOW = "하"       # 하급
+
+
+class RuleStatus(Enum):
+    """룰 검사 상태"""
+    FAILED = "failed"      # 취약점 발견
+    PASSED = "passed"      # 통과
+    SKIPPED = "skipped"    # 건너뜀
+    ERROR = "error"        # 오류
 
 
 @dataclass
@@ -63,7 +71,8 @@ class VulnerabilityIssue:
             'matchedText': self.matched_text,
             'description': self.description,
             'recommendation': self.recommendation,
-            'reference': self.reference
+            'reference': self.reference,
+            'status': 'failed'  # 취약점이므로 failed
         }
         
         if self.category:
@@ -101,14 +110,74 @@ class VulnerabilityIssue:
 
 
 @dataclass
+class PassedRule:
+    """🔥 새로운 클래스: 통과된 룰 정보"""
+    rule_id: str
+    title: str
+    description: str
+    severity: str
+    category: str
+    reference: str
+    reason: str = "Configuration compliant"  # 통과 이유
+    checked_items: Optional[List[Dict[str, Any]]] = None  # 검사된 항목들
+    analysis_details: Optional[Dict[str, Any]] = None
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """딕셔너리로 변환"""
+        result = {
+            'ruleId': self.rule_id,
+            'title': self.title,
+            'description': self.description,
+            'severity': self.severity,
+            'category': self.category,
+            'reference': self.reference,
+            'status': 'passed',
+            'reason': self.reason
+        }
+        
+        if self.checked_items:
+            result['checkedItems'] = self.checked_items
+        if self.analysis_details:
+            result['analysisDetails'] = self.analysis_details
+            
+        return result
+
+
+@dataclass
+class SkippedRule:
+    """🔥 새로운 클래스: 건너뛴 룰 정보"""
+    rule_id: str
+    title: str
+    description: str
+    severity: str
+    category: str
+    reference: str
+    reason: str  # 건너뛴 이유
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """딕셔너리로 변환"""
+        return {
+            'ruleId': self.rule_id,
+            'title': self.title,
+            'description': self.description,
+            'severity': self.severity,
+            'category': self.category,
+            'reference': self.reference,
+            'status': 'skipped',
+            'reason': self.reason
+        }
+
+
+@dataclass
 class AnalysisStatistics:
     """분석 통계 정보"""
     total_rules_checked: int
     rules_passed: int
     rules_failed: int
-    high_severity_issues: int
-    medium_severity_issues: int
-    low_severity_issues: int
+    rules_skipped: int = 0  # 🔥 새로운 필드
+    high_severity_issues: int = 0
+    medium_severity_issues: int = 0
+    low_severity_issues: int = 0
     # 🔥 새로운 필드: 상세 통계
     total_individual_findings: Optional[int] = None  # 개별 발견 사항 총 개수
     consolidated_rules: Optional[int] = None  # 통합된 룰 개수
@@ -119,9 +188,11 @@ class AnalysisStatistics:
             'totalRulesChecked': self.total_rules_checked,
             'rulesPassed': self.rules_passed,
             'rulesFailed': self.rules_failed,
+            'rulesSkipped': self.rules_skipped,
             'highSeverityIssues': self.high_severity_issues,
             'mediumSeverityIssues': self.medium_severity_issues,
-            'lowSeverityIssues': self.low_severity_issues
+            'lowSeverityIssues': self.low_severity_issues,
+            'complianceRate': round((self.rules_passed / max(self.total_rules_checked, 1)) * 100, 2)  # 🔥 컴플라이언스 비율
         }
         
         if self.total_individual_findings is not None:
@@ -136,8 +207,16 @@ class AnalysisStatistics:
 class AnalysisResult:
     """분석 결과"""
     vulnerabilities: List[VulnerabilityIssue]
-    analysis_time: float
+    passed_rules: List[PassedRule] = None  # 🔥 새로운 필드
+    skipped_rules: List[SkippedRule] = None  # 🔥 새로운 필드
+    analysis_time: float = 0.0
     statistics: Optional[AnalysisStatistics] = None
+    
+    def __post_init__(self):
+        if self.passed_rules is None:
+            self.passed_rules = []
+        if self.skipped_rules is None:
+            self.skipped_rules = []
     
     def get_issues_by_severity(self, severity: str) -> List[VulnerabilityIssue]:
         """특정 심각도의 취약점들만 반환"""
@@ -146,6 +225,17 @@ class AnalysisResult:
     def get_issues_by_rule(self, rule_id: str) -> List[VulnerabilityIssue]:
         """특정 룰의 취약점들만 반환"""
         return [issue for issue in self.vulnerabilities if issue.rule_id == rule_id]
+    
+    def get_all_results_by_status(self, status: str) -> List[Dict[str, Any]]:
+        """🔥 새로운 메서드: 상태별 모든 결과 반환"""
+        if status == 'failed':
+            return [vuln.to_dict() for vuln in self.vulnerabilities]
+        elif status == 'passed':
+            return [rule.to_dict() for rule in self.passed_rules]
+        elif status == 'skipped':
+            return [rule.to_dict() for rule in self.skipped_rules]
+        else:
+            return []
 
 
 @dataclass
@@ -156,6 +246,8 @@ class AnalysisResponse:
     issues_found: int
     analysis_time: float
     results: List[VulnerabilityIssue]
+    passed_rules: List[PassedRule] = None  # 🔥 새로운 필드
+    skipped_rules: List[SkippedRule] = None  # 🔥 새로운 필드
     statistics: Optional[AnalysisStatistics] = None
     timestamp: Optional[str] = None
     
@@ -163,9 +255,13 @@ class AnalysisResponse:
         """초기화 후 처리"""
         if self.timestamp is None:
             self.timestamp = datetime.now().isoformat()
+        if self.passed_rules is None:
+            self.passed_rules = []
+        if self.skipped_rules is None:
+            self.skipped_rules = []
     
-    def to_dict(self) -> Dict[str, Any]:
-        """딕셔너리로 변환"""
+    def to_dict(self, include_passed: bool = False, include_skipped: bool = False) -> Dict[str, Any]:
+        """🔥 개선된 딕셔너리 변환 - 옵션으로 통과/건너뛴 항목 포함"""
         response = {
             'success': True,
             'deviceType': self.device_type,
@@ -173,8 +269,20 @@ class AnalysisResponse:
             'issuesFound': self.issues_found,
             'analysisTime': self.analysis_time,
             'timestamp': self.timestamp,
-            'results': [issue.to_dict() for issue in self.results]
+            'results': {
+                'failed': [issue.to_dict() for issue in self.results]
+            }
         }
+        
+        # 🔥 통과된 룰 포함 (옵션)
+        if include_passed and self.passed_rules:
+            response['results']['passed'] = [rule.to_dict() for rule in self.passed_rules]
+            response['passedRulesCount'] = len(self.passed_rules)
+        
+        # 🔥 건너뛴 룰 포함 (옵션)
+        if include_skipped and self.skipped_rules:
+            response['results']['skipped'] = [rule.to_dict() for rule in self.skipped_rules]
+            response['skippedRulesCount'] = len(self.skipped_rules)
         
         if self.statistics:
             response['statistics'] = self.statistics.to_dict()
@@ -214,6 +322,8 @@ class AnalysisResponse:
             issues_found=len(filtered_results),
             analysis_time=self.analysis_time,
             results=filtered_results,
+            passed_rules=self.passed_rules,
+            skipped_rules=self.skipped_rules,
             statistics=self.statistics,
             timestamp=self.timestamp
         )

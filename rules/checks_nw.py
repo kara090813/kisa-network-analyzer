@@ -757,7 +757,7 @@ def check_nw_12(line: str, line_num: int, context: ConfigContext) -> List[Dict[s
                 'details': {
                     'vulnerability': 'no_explicit_logging_buffer_size',
                     'current_status': 'using_default_size',
-                    'recommendation': '로깅 버퍼 크기를 명시적으로 설정하세요. 권장 크기는 16,384바이트에서 32,768바이트 사이입니다.',
+                    'recommendation': '로깅 버퍼 크기를 명시적으로 설정하세요. 권장 크기는 16,000바이트에서 32,768바이트 사이입니다.',
                     'severity_adjusted': 'Medium'
                 }
             })
