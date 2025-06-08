@@ -290,11 +290,11 @@ NW_RULES = {
         severity="중",
         category=RuleCategory.LOG_MANAGEMENT,
         patterns=[
-            r"logging\s+buffered\s+[0-9]{1,4}$",  # 작은 버퍼 크기
+            r"logging\s+(buffered|buffer)\s+[0-9]{1,4}$",  # 작은 버퍼 크기
         ],
         negative_patterns=[
-            r"logging\s+buffered\s+1[6-9][0-9]{3}",  # 16000 이상
-            r"logging\s+buffered\s+[2-9][0-9]{4}",   # 20000 이상
+            r"logging\s+(buffered|buffer)s+1[6-9][0-9]{3}",  # 16000 이상
+            r"logging\s+(buffered|buffer)\s+[2-9][0-9]{4}",   # 20000 이상
         ],
         device_types=["Cisco", "Piolink", "HP", "Alcatel"],
         recommendation="로그저장 장치의 크기를 고려하여 버퍼 크기를 설정하고 2년 이상 보관한다",
@@ -310,7 +310,7 @@ NW_RULES = {
         category=RuleCategory.LOG_MANAGEMENT,
         patterns=[],
         negative_patterns=[
-            r"logging\s+buffered",
+            r"logging\s+b(buffered|buffer)",
             r"logging\s+host",
             r"logging\s+console",
             r"logging\s+trap",
