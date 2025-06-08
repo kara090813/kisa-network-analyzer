@@ -161,7 +161,6 @@ def analyze_config():
             "checkAllRules": true,
             "specificRuleIds": ["N-01", "N-04"],
             "returnRawMatches": false,
-            "enableLogicalAnalysis": true,
             "includeRecommendations": true,
             "useConsolidation": true,     // 통합 통계 사용 여부
             "showDetailedInfo": true,     // 상세 정보 표시 여부
@@ -180,13 +179,6 @@ def analyze_config():
         
         # 지침서 파라미터 처리
         framework = request.json.get('framework', 'KISA').upper()
-        
-        # 🔥 새로운 옵션들 처리
-        options = request.json.get('options', {})
-        use_consolidation = options.get('useConsolidation', True)
-        show_detailed_info = options.get('showDetailedInfo', True)
-        include_passed_rules = options.get('includePassedRules', False)  # 🔥 새로운 옵션
-        include_skipped_rules = options.get('includeSkippedRules', False)  # 🔥 새로운 옵션
         
         # 지침서 유효성 검증
         try:
@@ -225,6 +217,12 @@ def analyze_config():
                 "error": "요청 데이터 파싱 실패",
                 "details": str(e)
             }), 400
+        
+        # 🔥 분석 요청 객체에서 옵션 추출
+        use_consolidation = analysis_request.options.use_consolidation
+        show_detailed_info = analysis_request.options.show_detailed_info
+        include_passed_rules = analysis_request.options.include_passed_rules
+        include_skipped_rules = analysis_request.options.include_skipped_rules
         
         # 로깅
         config_lines_count = len(analysis_request.config_text.splitlines())
@@ -590,7 +588,7 @@ def get_analysis_statistics():
 def _extract_context_info(config_text: str, device_type: str) -> Dict[str, Any]:
     """설정 파일에서 컨텍스트 정보 추출 - IOS 버전 정보 포함"""
     try:
-        from rules.kisa_rules import parse_config_context
+        from rules.loader import parse_config_context
         context = parse_config_context(config_text, device_type)
         
         # 🔥 IOS 버전 정보 추출

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-models/analysis_request.py
-분석 요청 데이터 모델
+models/analysis_request.py (수정된 버전)
+분석 요청 데이터 모델 - 통과 항목 추적 옵션 추가
 
 KISA 네트워크 장비 취약점 분석 요청을 위한 데이터 구조 정의
 """
@@ -12,12 +12,17 @@ from typing import List, Optional, Dict, Any
 
 @dataclass
 class AnalysisOptions:
-    """분석 옵션"""
+    """분석 옵션 - 통과 항목 추적 기능 추가"""
     check_all_rules: bool = True
     specific_rule_ids: Optional[List[str]] = None
     return_raw_matches: bool = False
     skip_safe_checks: bool = False
     include_recommendations: bool = True
+    # 🔥 새로운 옵션들 추가
+    include_passed_rules: bool = False  # 통과된 룰 포함 여부
+    include_skipped_rules: bool = False  # 건너뛴 룰 포함 여부
+    use_consolidation: bool = True  # 통합 통계 사용 여부
+    show_detailed_info: bool = True  # 상세 정보 표시 여부
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'AnalysisOptions':
@@ -27,7 +32,12 @@ class AnalysisOptions:
             specific_rule_ids=data.get('specificRuleIds'),
             return_raw_matches=data.get('returnRawMatches', False),
             skip_safe_checks=data.get('skipSafeChecks', False),
-            include_recommendations=data.get('includeRecommendations', True)
+            include_recommendations=data.get('includeRecommendations', True),
+            # 🔥 새로운 옵션들 처리
+            include_passed_rules=data.get('includePassedRules', False),
+            include_skipped_rules=data.get('includeSkippedRules', False),
+            use_consolidation=data.get('useConsolidation', True),
+            show_detailed_info=data.get('showDetailedInfo', True)
         )
     
     def to_dict(self) -> Dict[str, Any]:
@@ -37,7 +47,12 @@ class AnalysisOptions:
             'specificRuleIds': self.specific_rule_ids,
             'returnRawMatches': self.return_raw_matches,
             'skipSafeChecks': self.skip_safe_checks,
-            'includeRecommendations': self.include_recommendations
+            'includeRecommendations': self.include_recommendations,
+            # 🔥 새로운 옵션들 포함
+            'includePassedRules': self.include_passed_rules,
+            'includeSkippedRules': self.include_skipped_rules,
+            'useConsolidation': self.use_consolidation,
+            'showDetailedInfo': self.show_detailed_info
         }
 
 
